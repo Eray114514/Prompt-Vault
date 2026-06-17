@@ -1,0 +1,151 @@
+import { NextRequest, NextResponse } from "next/server";
+import { supabase } from "@/lib/supabase";
+import type { NewPrompt } from "@/lib/types";
+
+const VALID_CATEGORIES = [
+  "image_generation",
+  "image_editing",
+  "video_generation",
+  "llm_chat",
+] as const;
+
+type ValidCategory = (typeof VALID_CATEGORIES)[number];
+
+function corsHeaders() {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  };
+}
+
+function jsonResponse(body: unknown, status = 200) {
+  return NextResponse.json(body, { status, headers: corsHeaders() });
+}
+
+export async function OPTIONS() {
+  return new Response(null, { status: 204, headers: corsHeaders() });
+}
+
+function isValidCategory(value: unknown): value is ValidCategory {
+  return typeof value === "string" && VALID_CATEGORIES.includes(value as ValidCategory);
+}
+
+function matchQuery(prompt: { title: string; content: string; tags: string[] }, q: string) {
+  const lower = q.toLowerCase();
+  return (
+    prompt.title.toLowerCase().includes(lower) ||
+    prompt.content.toLowerCase().includes(lower) ||
+    prompt.tags.some((tag) => tag.toLowerCase().includes(lower))
+  );
+}
+
+export async function GET(request: NextRequest) {
+  const { searchParams } = request.nextUrl;
+  const category = searchParams.get("category");
+  const q = searchParams.get("q")?.trim();
+  const limitParam = searchParams.get("limit");
+  const limit = Math.min(
+    Math.max(parseInt(limitParam ?? "20", 10) || 20, 1),
+    100
+  );
+
+  if (category && !isValidCategory(category)) {
+    return jsonResponse(
+      {
+        error: `Invalid category. Must be one of: ${VALID_CATEGORIES.join(", ")}`,
+      },
+      400
+    );
+  }
+
+  const buildQuery = (isFavorite: boolean) => {
+    let query = supabase.from("prompts").select("*").eq("is_favorite", isFavorite);
+    if (category) {
+      query = query.eq("category", category);
+    }
+    query = query.order("updated_at", { ascending: false });
+    return query;
+  };
+
+  const [{ data: favorites, error: favError }, { data: nonFavorites, error: nonFavError }] =
+    await Promise.all([buildQuery(true), buildQuery(false)]);
+
+  if (favError || nonFavError) {
+    return jsonResponse(
+      { error: favError?.message ?? nonFavError?.message },
+      500
+    );
+  }
+
+  const allFavorites = (favorites ?? []).filter((p) => !q || matchQuery(p, q));
+  const nonFavoritesToReturn = (nonFavorites ?? [])
+    .filter((p) => !q || matchQuery(p, q))
+    .slice(0, limit);
+
+  return jsonResponse({
+    data: [...allFavorites, ...nonFavoritesToReturn],
+    meta: {
+      favoritesReturned: allFavorites.length,
+      nonFavoritesReturned: nonFavoritesToReturn.length,
+      nonFavoritesLimit: limit,
+      category: category ?? null,
+      q: q ?? null,
+    },
+  });
+}
+
+export async function POST(request: NextRequest) {
+  const apiSecret = process.env.API_SECRET;
+  if (apiSecret) {
+    const auth = request.headers.get("authorization");
+    if (auth !== `Bearer ${apiSecret}`) {
+      return jsonResponse({ error: "Unauthorized" }, 401);
+    }
+  }
+
+  let body: Partial<NewPrompt>;
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse({ error: "Invalid JSON body" }, 400);
+  }
+
+  const { title, content, category, tags } = body;
+
+  if (!title || typeof title !== "string" || !title.trim()) {
+    return jsonResponse({ error: "title is required" }, 400);
+  }
+  if (!content || typeof content !== "string" || !content.trim()) {
+    return jsonResponse({ error: "content is required" }, 400);
+  }
+  if (!isValidCategory(category)) {
+    return jsonResponse(
+      {
+        error: `category is required and must be one of: ${VALID_CATEGORIES.join(", ")}`,
+      },
+      400
+    );
+  }
+
+  const payload: NewPrompt = {
+    title: title.trim(),
+    content: content.trim(),
+    category,
+    tags: Array.isArray(tags)
+      ? tags.filter((tag): tag is string => typeof tag === "string")
+      : [],
+  };
+
+  const { data, error } = await supabase
+    .from("prompts")
+    .insert(payload)
+    .select()
+    .single();
+
+  if (error) {
+    return jsonResponse({ error: error.message }, 500);
+  }
+
+  return jsonResponse({ data }, 201);
+}

@@ -142,6 +142,24 @@ export function PencilIcon({ size, ...props }: IconProps) {
   );
 }
 
+export function CodeIcon({ size, ...props }: IconProps) {
+  return (
+    <svg {...Svg({ size, ...props })}>
+      <polyline points="16 18 22 12 16 6" />
+      <polyline points="8 6 2 12 8 18" />
+    </svg>
+  );
+}
+
+export function ArrowLeftIcon({ size, ...props }: IconProps) {
+  return (
+    <svg {...Svg({ size, ...props })}>
+      <path d="m12 19-7-7 7-7" />
+      <path d="M19 12H5" />
+    </svg>
+  );
+}
+
 const ICON_MAP: Record<string, React.FC<IconProps>> = {
   all: AllIcon,
   star: StarIcon,
@@ -149,6 +167,7 @@ const ICON_MAP: Record<string, React.FC<IconProps>> = {
   edit: EditIcon,
   video: VideoIcon,
   chat: ChatIcon,
+  code: CodeIcon,
 };
 
 export function NavIcon({
