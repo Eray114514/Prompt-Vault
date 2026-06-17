@@ -14,5 +14,6 @@ function getBaseUrl() {
 
 export default function ApiDocsPage() {
   const baseUrl = getBaseUrl();
-  return <ApiDocsClient baseUrl={baseUrl} />;
+  const hasApiSecret = Boolean(process.env.API_SECRET);
+  return <ApiDocsClient baseUrl={baseUrl} hasApiSecret={hasApiSecret} />;
 }

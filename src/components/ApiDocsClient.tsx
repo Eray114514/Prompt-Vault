@@ -11,42 +11,16 @@ import { CopyIcon, CheckIcon, ArrowLeftIcon } from "./Icons";
 
 interface ApiDocsClientProps {
   baseUrl: string;
+  hasApiSecret: boolean;
 }
 
 function CodeBlock({ code, label }: { code: string; label: string }) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(code);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // ignore
-    }
-  }, [code]);
-
   return (
     <div className="overflow-hidden rounded-lg border border-border-subtle bg-bg-base/70">
-      <div className="flex items-center justify-between border-b border-border-subtle bg-bg-elevated/50 px-3 py-2">
+      <div className="border-b border-border-subtle bg-bg-elevated/50 px-3 py-2">
         <span className="text-[11px] uppercase tracking-wider text-text-muted">
           {label}
         </span>
-        <button
-          onClick={handleCopy}
-          className={`btn text-xs ${
-            copied
-              ? "text-fav"
-              : "text-text-secondary hover:text-text-primary"
-          }`}
-        >
-          {copied ? (
-            <CheckIcon size={13} />
-          ) : (
-            <CopyIcon size={13} />
-          )}
-          {copied ? "已复制" : "复制"}
-        </button>
       </div>
       <pre className="scrollbar-thin overflow-x-auto p-4 font-mono text-xs leading-relaxed text-text-secondary">
         <code>{code}</code>
@@ -55,8 +29,40 @@ function CodeBlock({ code, label }: { code: string; label: string }) {
   );
 }
 
-export function ApiDocsClient({ baseUrl }: ApiDocsClientProps) {
+function CopyDocButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // ignore
+    }
+  }, [text]);
+
+  return (
+    <button
+      onClick={handleCopy}
+      className={`btn rounded-lg border border-border-subtle px-3 text-xs transition ${
+        copied
+          ? "text-fav"
+          : "text-text-secondary hover:bg-bg-hover hover:text-text-primary"
+      }`}
+    >
+      {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
+      {copied ? "已复制" : "复制文档"}
+    </button>
+  );
+}
+
+export function ApiDocsClient({ baseUrl, hasApiSecret }: ApiDocsClientProps) {
   const apiBase = `${baseUrl}/api/prompts`;
+
+  const categoryList = CATEGORIES.map(
+    (c) => `- ${c.value}（${CATEGORY_LABELS[c.value]}）`
+  ).join("\n");
 
   const listExample = `curl -G "${apiBase}" \\
   --data-urlencode "category=llm_chat" \\
@@ -64,30 +70,66 @@ export function ApiDocsClient({ baseUrl }: ApiDocsClientProps) {
   --data-urlencode "limit=10"`;
 
   const createExample = `curl -X POST "${apiBase}" \\
-  -H "Content-Type: application/json" \\
-  -d '{
+  -H "Content-Type: application/json" ${
+    hasApiSecret ? '\\\n  -H "Authorization: Bearer YOUR_API_SECRET" ' : ""
+  }\\\n  -d '{
     "title": "示例提示词",
     "content": "请根据以下内容生成一张未来城市夜景图...",
     "category": "image_generation",
     "tags": ["future", "city", "night"]
   }'`;
 
+  const docsText = `Prompt Vault API
+基础地址：${baseUrl}
+
+GET ${apiBase}
+返回所有收藏提示词，以及最多 limit 条非收藏提示词。
+参数：
+- category：可选，按分类筛选
+- q：可选，搜索标题、内容、标签（不区分大小写）
+- limit：可选，默认 20，最大 100
+
+示例：
+${listExample}
+
+POST ${apiBase}
+新增一条提示词。${
+    hasApiSecret
+      ? "\n需要请求头：Authorization: Bearer YOUR_API_SECRET"
+      : ""
+  }
+请求体：
+- title：必填
+- content：必填
+- category：必填
+- tags：可选
+
+示例：
+${createExample}
+
+分类取值：
+${categoryList}
+`;
+
   return (
     <div className="relative z-10 flex h-screen flex-col overflow-hidden bg-bg-base">
-      <header className="glass flex shrink-0 items-center gap-4 border-b border-border-subtle/60 px-6 py-4">
-        <Link
-          href="/"
-          className="btn rounded-lg border border-border-subtle px-3 text-text-secondary hover:bg-bg-hover hover:text-text-primary"
-        >
-          <ArrowLeftIcon size={16} />
-          返回
-        </Link>
-        <div>
-          <h1 className="font-display text-xl font-medium tracking-wide text-white">
-            Prompt Vault API
-          </h1>
-          <p className="text-xs text-text-muted">外部调用与 AI 读取提示词</p>
+      <header className="glass flex shrink-0 items-center justify-between border-b border-border-subtle/60 px-6 py-4">
+        <div className="flex items-center gap-4">
+          <Link
+            href="/"
+            className="btn rounded-lg border border-border-subtle px-3 text-text-secondary hover:bg-bg-hover hover:text-text-primary"
+          >
+            <ArrowLeftIcon size={16} />
+            返回
+          </Link>
+          <div>
+            <h1 className="font-display text-xl font-medium tracking-wide text-white">
+              Prompt Vault API
+            </h1>
+            <p className="text-xs text-text-muted">外部调用与 AI 读取提示词</p>
+          </div>
         </div>
+        <CopyDocButton text={docsText} />
       </header>
 
       <main className="flex-1 overflow-y-auto px-6 py-8 md:px-10">
@@ -110,7 +152,10 @@ export function ApiDocsClient({ baseUrl }: ApiDocsClientProps) {
               <h2 className="font-display text-lg text-white">获取提示词列表</h2>
             </div>
             <p className="mb-3 text-sm text-text-secondary">
-              返回所有收藏的提示词，以及最多 <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">limit</code>{" "}
+              返回所有收藏的提示词，以及最多{" "}
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                limit
+              </code>{" "}
               条非收藏提示词。可分类、可搜索。
             </p>
 
@@ -154,11 +199,15 @@ export function ApiDocsClient({ baseUrl }: ApiDocsClientProps) {
               </span>
               <h2 className="font-display text-lg text-white">添加提示词</h2>
             </div>
-            <p className="mb-3 text-sm text-text-secondary">
-              向档案库新增一条提示词。若服务端设置了环境变量{" "}
-              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">API_SECRET</code>，
-              则需要在请求头中携带对应的 Bearer Token。
-            </p>
+            {hasApiSecret && (
+              <p className="mb-3 text-sm text-text-secondary">
+                需要在请求头中携带{" "}
+                <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                  Authorization: Bearer YOUR_API_SECRET
+                </code>
+                。
+              </p>
+            )}
 
             <div className="mb-4 overflow-hidden rounded-lg border border-border-subtle">
               <table className="w-full text-left text-sm">

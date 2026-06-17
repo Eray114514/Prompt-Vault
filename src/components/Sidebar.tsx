@@ -1,10 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
 import { NAV_ITEMS, type FilterKey, type Category } from "@/lib/types";
 import { CATEGORY_COLORS } from "@/lib/types";
-import { NavIcon } from "./Icons";
+import { NavIcon, CodeIcon } from "./Icons";
 
 interface SidebarProps {
   filter: FilterKey;
@@ -17,9 +16,6 @@ function isCategory(value: FilterKey): value is Category {
 }
 
 export function Sidebar({ filter, onFilterChange, counts }: SidebarProps) {
-  const pathname = usePathname();
-  const docsActive = pathname === "/api-docs";
-
   return (
     <aside className="glass relative flex w-60 shrink-0 flex-col border-r border-border-subtle/60">
       {/* 侧边栏顶部 logo */}
@@ -98,29 +94,6 @@ export function Sidebar({ filter, onFilterChange, counts }: SidebarProps) {
         })}
       </nav>
 
-      {/* API 文档入口 */}
-      <div className="border-t border-border-subtle/60 px-3 py-3">
-        <Link
-          href="/api-docs"
-          className={`group flex w-full items-center gap-3 rounded-lg px-3.5 py-2.5 text-sm transition-all duration-200 ${
-            docsActive
-              ? "bg-bg-elevated text-white shadow-md"
-              : "text-text-secondary hover:bg-bg-hover hover:text-text-primary"
-          }`}
-        >
-          <span
-            className={`transition-colors duration-200 ${
-              docsActive
-                ? "text-white"
-                : "text-text-muted group-hover:text-text-primary"
-            }`}
-          >
-            <NavIcon name="code" size={17} />
-          </span>
-          <span className="flex-1 text-left font-medium">API 文档</span>
-        </Link>
-      </div>
-
       {/* 底部信息 */}
       <div className="border-t border-border-subtle/60 px-6 py-4">
         <p className="text-[10px] leading-relaxed text-text-muted">
@@ -128,6 +101,13 @@ export function Sidebar({ filter, onFilterChange, counts }: SidebarProps) {
           <br />
           Supabase 多端同步
         </p>
+        <Link
+          href="/api-docs"
+          className="mt-2 inline-flex items-center gap-1 text-[10px] text-text-muted transition hover:text-text-secondary"
+        >
+          <CodeIcon size={11} />
+          API 文档
+        </Link>
       </div>
     </aside>
   );
