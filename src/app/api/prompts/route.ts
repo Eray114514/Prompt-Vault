@@ -42,7 +42,9 @@ function matchQuery(prompt: { title: string; content: string; tags: string[] }, 
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
-  const category = searchParams.get("category");
+  const rawCategories = searchParams.getAll("category");
+  const categories =
+    rawCategories.length > 0 ? rawCategories : ["image_generation"];
   const q = searchParams.get("q")?.trim();
   const limitParam = searchParams.get("limit");
   const limit = Math.min(
@@ -50,7 +52,8 @@ export async function GET(request: NextRequest) {
     100
   );
 
-  if (category && !isValidCategory(category)) {
+  const invalidCategories = categories.filter((c) => !isValidCategory(c));
+  if (invalidCategories.length > 0) {
     return jsonResponse(
       {
         error: `Invalid category. Must be one of: ${VALID_CATEGORIES.join(", ")}`,
@@ -60,11 +63,12 @@ export async function GET(request: NextRequest) {
   }
 
   const buildQuery = (isFavorite: boolean) => {
-    let query = supabase.from("prompts").select("*").eq("is_favorite", isFavorite);
-    if (category) {
-      query = query.eq("category", category);
-    }
-    query = query.order("updated_at", { ascending: false });
+    let query = supabase
+      .from("prompts")
+      .select("*")
+      .eq("is_favorite", isFavorite)
+      .in("category", categories)
+      .order("updated_at", { ascending: false });
     return query;
   };
 
@@ -89,7 +93,7 @@ export async function GET(request: NextRequest) {
       favoritesReturned: allFavorites.length,
       nonFavoritesReturned: nonFavoritesToReturn.length,
       nonFavoritesLimit: limit,
-      category: category ?? null,
+      categories,
       q: q ?? null,
     },
   });

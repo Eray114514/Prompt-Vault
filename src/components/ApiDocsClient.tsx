@@ -65,7 +65,8 @@ export function ApiDocsClient({ baseUrl, hasApiSecret }: ApiDocsClientProps) {
   ).join("\n");
 
   const listExample = `curl -G "${apiBase}" \\
-  --data-urlencode "category=llm_chat" \\
+  --data-urlencode "category=image_generation" \\
+  --data-urlencode "category=video_generation" \\
   --data-urlencode "q=midjourney" \\
   --data-urlencode "limit=10"`;
 
@@ -84,8 +85,11 @@ export function ApiDocsClient({ baseUrl, hasApiSecret }: ApiDocsClientProps) {
 
 GET ${apiBase}
 返回所有收藏提示词，以及最多 limit 条非收藏提示词。
+默认只返回 image_generation 分类；不传 category 时等效于 category=image_generation。
+如需多个分类，可重复传入 category 参数。
+每条返回数据包含 is_favorite 字段，用于区分收藏与非收藏。
 参数：
-- category：可选，按分类筛选
+- category：可选，默认 image_generation；可重复传入多个值
 - q：可选，搜索标题、内容、标签（不区分大小写）
 - limit：可选，默认 20，最大 100
 
@@ -156,7 +160,16 @@ ${categoryList}
               <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
                 limit
               </code>{" "}
-              条非收藏提示词。可分类、可搜索。
+              条非收藏提示词。默认返回{" "}
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                image_generation
+              </code>{" "}
+              分类；不传 category 时等效于 category=image_generation。如需多个分类，可重复传入
+              category 参数。每条数据都包含{" "}
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                is_favorite
+              </code>{" "}
+              字段。
             </p>
 
             <div className="mb-4 overflow-hidden rounded-lg border border-border-subtle">
@@ -172,7 +185,7 @@ ${categoryList}
                   <tr>
                     <td className="px-4 py-2 font-mono text-xs">category</td>
                     <td className="px-4 py-2 text-xs">string</td>
-                    <td className="px-4 py-2">可选，按分类筛选</td>
+                    <td className="px-4 py-2">可选，默认 image_generation；可重复传入多个值</td>
                   </tr>
                   <tr>
                     <td className="px-4 py-2 font-mono text-xs">q</td>
