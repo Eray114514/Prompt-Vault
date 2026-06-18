@@ -1,3 +1,6 @@
+export const runtime = "edge";
+export const dynamic = "force-dynamic";
+
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import type { NewPrompt } from "@/lib/types";
@@ -19,8 +22,18 @@ function corsHeaders() {
   };
 }
 
-function jsonResponse(body: unknown, status = 200) {
-  return NextResponse.json(body, { status, headers: corsHeaders() });
+function cacheHeaders() {
+  return {
+    ...corsHeaders(),
+    "Cache-Control": "public, s-maxage=30, stale-while-revalidate=300",
+  };
+}
+
+function jsonResponse(body: unknown, status = 200, useCache = false) {
+  return NextResponse.json(body, {
+    status,
+    headers: useCache ? cacheHeaders() : corsHeaders(),
+  });
 }
 
 export async function OPTIONS() {
@@ -40,6 +53,14 @@ function matchQuery(prompt: { title: string; content: string; tags: string[] }, 
   );
 }
 
+type ApiPromptRow = {
+  title: string;
+  content: string;
+  category: string;
+  tags: string[];
+  is_favorite: boolean;
+};
+
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const rawCategories = searchParams.getAll("category");
@@ -48,7 +69,7 @@ export async function GET(request: NextRequest) {
   const q = searchParams.get("q")?.trim();
   const limitParam = searchParams.get("limit");
   const limit = Math.min(
-    Math.max(parseInt(limitParam ?? "20", 10) || 20, 1),
+    Math.max(parseInt(limitParam ?? "10", 10) || 10, 1),
     100
   );
 
@@ -62,15 +83,14 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const buildQuery = (isFavorite: boolean) => {
-    let query = supabase
+  const buildQuery = (isFavorite: boolean) =>
+    supabase
       .from("prompts")
-      .select("*")
+      .select("title,content,category,tags,is_favorite")
       .eq("is_favorite", isFavorite)
       .in("category", categories)
-      .order("updated_at", { ascending: false });
-    return query;
-  };
+      .order("updated_at", { ascending: false })
+      .returns<ApiPromptRow[]>();
 
   const [{ data: favorites, error: favError }, { data: nonFavorites, error: nonFavError }] =
     await Promise.all([buildQuery(true), buildQuery(false)]);
@@ -87,16 +107,20 @@ export async function GET(request: NextRequest) {
     .filter((p) => !q || matchQuery(p, q))
     .slice(0, limit);
 
-  return jsonResponse({
-    data: [...allFavorites, ...nonFavoritesToReturn],
-    meta: {
-      favoritesReturned: allFavorites.length,
-      nonFavoritesReturned: nonFavoritesToReturn.length,
-      nonFavoritesLimit: limit,
-      categories,
-      q: q ?? null,
+  return jsonResponse(
+    {
+      data: [...allFavorites, ...nonFavoritesToReturn],
+      meta: {
+        favoritesReturned: allFavorites.length,
+        nonFavoritesReturned: nonFavoritesToReturn.length,
+        nonFavoritesLimit: limit,
+        categories,
+        q: q ?? null,
+      },
     },
-  });
+    200,
+    true
+  );
 }
 
 export async function POST(request: NextRequest) {

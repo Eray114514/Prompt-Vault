@@ -87,11 +87,11 @@ GET ${apiBase}
 返回所有收藏提示词，以及最多 limit 条非收藏提示词。
 默认只返回 image_generation 分类；不传 category 时等效于 category=image_generation。
 如需多个分类，可重复传入 category 参数。
-每条返回数据包含 is_favorite 字段，用于区分收藏与非收藏。
+返回字段仅包含：title、content、category、tags、is_favorite（不再返回 id 和时间戳）。
 参数：
 - category：可选，默认 image_generation；可重复传入多个值
 - q：可选，搜索标题、内容、标签（不区分大小写）
-- limit：可选，默认 20，最大 100
+- limit：可选，默认 10，最大 100
 
 示例：
 ${listExample}
@@ -165,11 +165,7 @@ ${categoryList}
                 image_generation
               </code>{" "}
               分类；不传 category 时等效于 category=image_generation。如需多个分类，可重复传入
-              category 参数。每条数据都包含{" "}
-              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
-                is_favorite
-              </code>{" "}
-              字段。
+              category 参数。返回字段仅包含 title、content、category、tags、is_favorite。
             </p>
 
             <div className="mb-4 overflow-hidden rounded-lg border border-border-subtle">
@@ -195,7 +191,7 @@ ${categoryList}
                   <tr>
                     <td className="px-4 py-2 font-mono text-xs">limit</td>
                     <td className="px-4 py-2 text-xs">number</td>
-                    <td className="px-4 py-2">可选，非收藏提示词数量上限，默认 20，最大 100</td>
+                    <td className="px-4 py-2">可选，非收藏提示词数量上限，默认 10，最大 100</td>
                   </tr>
                 </tbody>
               </table>
