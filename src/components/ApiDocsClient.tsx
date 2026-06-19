@@ -88,7 +88,7 @@ GET ${apiBase}
 返回所有收藏提示词，以及最多 limit 条非收藏提示词。
 默认只返回 image_generation 分类；不传 category 时等效于 category=image_generation。
 如需多个分类，可重复传入 category 参数。
-返回字段仅包含：title、content、notes、category、tags、is_favorite（不再返回 id 和时间戳）。
+返回字段仅包含：title、content、notes、tags、is_favorite；仅当传入多个 category 时额外返回 category（不再返回 id 和时间戳）。
 参数：
 - category：可选，默认 image_generation；可重复传入多个值
 - q：可选，搜索标题、内容、备注、标签（不区分大小写）
@@ -167,7 +167,7 @@ ${categoryList}
                 image_generation
               </code>{" "}
               分类；不传 category 时等效于 category=image_generation。如需多个分类，可重复传入
-              category 参数。返回字段仅包含 title、content、notes、category、tags、is_favorite。
+              category 参数。返回字段仅包含 title、content、notes、tags、is_favorite；仅当传入多个 category 时额外返回 category。
             </p>
 
             <div className="mb-4 overflow-hidden rounded-lg border border-border-subtle">

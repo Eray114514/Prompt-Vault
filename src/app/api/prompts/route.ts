@@ -69,7 +69,7 @@ type ApiPromptRow = {
   title: string;
   content: string;
   notes: string;
-  category: string;
+  category?: string;
   tags: string[];
   is_favorite: boolean;
 };
@@ -96,10 +96,15 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  const includeCategory = rawCategories.length > 1;
+  const selectColumns = includeCategory
+    ? "title,content,notes,category,tags,is_favorite"
+    : "title,content,notes,tags,is_favorite";
+
   const buildQuery = (isFavorite: boolean) =>
     supabase
       .from("prompts")
-      .select("title,content,notes,category,tags,is_favorite")
+      .select(selectColumns)
       .eq("is_favorite", isFavorite)
       .in("category", categories)
       .order("updated_at", { ascending: false })
