@@ -50,7 +50,8 @@ export function PromptCard({
       : noteLinePreview;
   const isNotesLong =
     Boolean(notes) &&
-    (noteLines.length > NOTE_PREVIEW_LINES || notes!.length > notePreview.length);
+    (noteLines.length > NOTE_PREVIEW_LINES ||
+      notes!.length > notePreview.length);
   const notesToShow = notesExpanded ? notes : notePreview;
 
   return (
@@ -138,7 +139,9 @@ export function PromptCard({
           </div>
           <div
             className={`whitespace-pre-wrap break-words ${
-              notesExpanded ? "max-h-44 overflow-y-auto pr-1 scrollbar-thin" : ""
+              notesExpanded
+                ? "max-h-44 overflow-y-auto pr-1 scrollbar-thin"
+                : "max-h-20 overflow-hidden"
             }`}
           >
             {notesToShow}
