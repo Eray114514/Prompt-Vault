@@ -10,6 +10,7 @@ export interface Prompt {
   id: string;
   title: string;
   content: string;
+  notes: string;
   category: Category;
   tags: string[];
   is_favorite: boolean;
@@ -20,6 +21,7 @@ export interface Prompt {
 export interface NewPrompt {
   title: string;
   content: string;
+  notes: string;
   category: Category;
   tags: string[];
 }
