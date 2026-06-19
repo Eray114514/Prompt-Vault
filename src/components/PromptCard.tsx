@@ -24,6 +24,7 @@ export function PromptCard({
 }: PromptCardProps) {
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [notesExpanded, setNotesExpanded] = useState(false);
 
   const handleCopy = () => {
     onCopy(prompt.content);
@@ -39,6 +40,18 @@ export function PromptCard({
 
   const catColor = categoryColor(prompt.category);
   const notes = prompt.notes?.trim();
+  const NOTE_PREVIEW_LEN = 140;
+  const NOTE_PREVIEW_LINES = 4;
+  const noteLines = notes?.split(/\r?\n/) ?? [];
+  const noteLinePreview = noteLines.slice(0, NOTE_PREVIEW_LINES).join("\n");
+  const notePreview =
+    noteLinePreview.length > NOTE_PREVIEW_LEN
+      ? noteLinePreview.slice(0, NOTE_PREVIEW_LEN).trimEnd()
+      : noteLinePreview;
+  const isNotesLong =
+    Boolean(notes) &&
+    (noteLines.length > NOTE_PREVIEW_LINES || notes!.length > notePreview.length);
+  const notesToShow = notesExpanded ? notes : notePreview;
 
   return (
     <div
@@ -108,10 +121,31 @@ export function PromptCard({
 
       {notes && (
         <div className="mb-4 rounded-md border border-border-subtle/50 bg-bg-hover/50 px-3 py-2 text-xs leading-relaxed text-text-secondary">
-          <span className="mr-2 text-[10px] uppercase tracking-wider text-text-muted">
-            备注
-          </span>
-          {notes}
+          <div className="mb-1 flex items-center justify-between gap-3">
+            <span className="text-[10px] uppercase tracking-wider text-text-muted">
+              备注
+            </span>
+            {isNotesLong && (
+              <button
+                type="button"
+                onClick={() => setNotesExpanded((prev) => !prev)}
+                className="shrink-0 text-[10px] uppercase tracking-wider transition hover:text-text-primary"
+                style={{ color: catColor }}
+              >
+                {notesExpanded ? "收起" : "展开"}
+              </button>
+            )}
+          </div>
+          <div
+            className={`whitespace-pre-wrap break-words ${
+              notesExpanded ? "max-h-44 overflow-y-auto pr-1 scrollbar-thin" : ""
+            }`}
+          >
+            {notesToShow}
+            {isNotesLong && !notesExpanded && (
+              <span className="text-text-muted"> ...</span>
+            )}
+          </div>
         </div>
       )}
 

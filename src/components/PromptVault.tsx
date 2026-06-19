@@ -195,7 +195,7 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
               hasPrompts={prompts.length > 0}
             />
           ) : (
-            <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            <div className="grid grid-cols-1 items-start gap-5 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
               {filteredPrompts.map((prompt, idx) => (
                 <PromptCard
                   key={prompt.id}
