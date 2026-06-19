@@ -34,9 +34,10 @@
   - 🎬 Video Generation (`video_generation`)
   - 💬 LLM Chat (`llm_chat`)
 - **CRUD Operations** — Create, read, update, and delete prompts.
+- **Notes** — Add usage notes or image-specific remarks to each prompt.
 - **One-Click Copy** — Copy prompt content to your clipboard instantly.
 - **Clipboard Detection** — Automatically detects clipboard text and suggests adding a new prompt.
-- **Full-Text Search** — Search across titles, content, and tags.
+- **Full-Text Search** — Search across titles, content, notes, and tags.
 - **Favorites Filter** — Quickly view and manage your favorite prompts.
 - **Dark Theme + Neon Index Cards** — Distinctive neon index-card visual style with category-based accent colors.
 - **Multi-Device Sync** — Powered by Supabase, so your prompts stay in sync across devices.
@@ -121,6 +122,7 @@ create table prompts (
   id uuid primary key default gen_random_uuid(),
   title text not null,
   content text not null,
+  notes text not null default '',
   category text not null check (category in ('image_generation', 'image_editing', 'video_generation', 'llm_chat')),
   tags text[] not null default '{}',
   is_favorite boolean not null default false,
@@ -130,6 +132,13 @@ create table prompts (
 
 -- Enable Row Level Security (RLS) if you plan to support authentication later.
 alter table prompts enable row level security;
+```
+
+If you already created the table before notes were added, run:
+
+```sql
+alter table prompts
+add column if not exists notes text not null default '';
 ```
 
 ### Category Colors
@@ -209,9 +218,10 @@ This project is licensed under the [MIT License](LICENSE).
 
 - 按四大分类管理提示词：图片生成、图片编辑、视频生成、AI 对话
 - 新建 / 编辑 / 删除提示词
+- 为提示词添加备注
 - 一键复制提示词内容
 - 剪贴板检测，自动提示添加
-- 全文搜索（标题、内容、标签）
+- 全文搜索（标题、内容、备注、标签）
 - 收藏筛选
 - 深色主题 + 霓虹索引卡视觉风格
 

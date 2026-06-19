@@ -38,6 +38,7 @@ export function PromptCard({
     : prompt.content.slice(0, PREVIEW_LEN);
 
   const catColor = categoryColor(prompt.category);
+  const notes = prompt.notes?.trim();
 
   return (
     <div
@@ -104,6 +105,15 @@ export function PromptCard({
           </span>
         )}
       </div>
+
+      {notes && (
+        <div className="mb-4 rounded-md border border-border-subtle/50 bg-bg-hover/50 px-3 py-2 text-xs leading-relaxed text-text-secondary">
+          <span className="mr-2 text-[10px] uppercase tracking-wider text-text-muted">
+            备注
+          </span>
+          {notes}
+        </div>
+      )}
 
       {/* 内容 */}
       <div

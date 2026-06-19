@@ -76,6 +76,7 @@ export function ApiDocsClient({ baseUrl, hasApiSecret }: ApiDocsClientProps) {
   }\\\n  -d '{
     "title": "示例提示词",
     "content": "请根据以下内容生成一张未来城市夜景图...",
+    "notes": "适合 16:9 海报构图，可搭配冷色霓虹光。",
     "category": "image_generation",
     "tags": ["future", "city", "night"]
   }'`;
@@ -87,10 +88,10 @@ GET ${apiBase}
 返回所有收藏提示词，以及最多 limit 条非收藏提示词。
 默认只返回 image_generation 分类；不传 category 时等效于 category=image_generation。
 如需多个分类，可重复传入 category 参数。
-返回字段仅包含：title、content、category、tags、is_favorite（不再返回 id 和时间戳）。
+返回字段仅包含：title、content、notes、category、tags、is_favorite（不再返回 id 和时间戳）。
 参数：
 - category：可选，默认 image_generation；可重复传入多个值
-- q：可选，搜索标题、内容、标签（不区分大小写）
+- q：可选，搜索标题、内容、备注、标签（不区分大小写）
 - limit：可选，默认 10，最大 100
 
 示例：
@@ -105,6 +106,7 @@ POST ${apiBase}
 请求体：
 - title：必填
 - content：必填
+- notes：可选
 - category：必填
 - tags：可选
 
@@ -165,7 +167,7 @@ ${categoryList}
                 image_generation
               </code>{" "}
               分类；不传 category 时等效于 category=image_generation。如需多个分类，可重复传入
-              category 参数。返回字段仅包含 title、content、category、tags、is_favorite。
+              category 参数。返回字段仅包含 title、content、notes、category、tags、is_favorite。
             </p>
 
             <div className="mb-4 overflow-hidden rounded-lg border border-border-subtle">
@@ -186,7 +188,7 @@ ${categoryList}
                   <tr>
                     <td className="px-4 py-2 font-mono text-xs">q</td>
                     <td className="px-4 py-2 text-xs">string</td>
-                    <td className="px-4 py-2">可选，搜索标题、内容、标签（不区分大小写）</td>
+                    <td className="px-4 py-2">可选，搜索标题、内容、备注、标签（不区分大小写）</td>
                   </tr>
                   <tr>
                     <td className="px-4 py-2 font-mono text-xs">limit</td>
@@ -237,6 +239,11 @@ ${categoryList}
                     <td className="px-4 py-2 font-mono text-xs">content</td>
                     <td className="px-4 py-2 text-xs">string</td>
                     <td className="px-4 py-2">必填，提示词内容</td>
+                  </tr>
+                  <tr>
+                    <td className="px-4 py-2 font-mono text-xs">notes</td>
+                    <td className="px-4 py-2 text-xs">string</td>
+                    <td className="px-4 py-2">可选，备注</td>
                   </tr>
                   <tr>
                     <td className="px-4 py-2 font-mono text-xs">category</td>

@@ -53,6 +53,7 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
         (p) =>
           p.title.toLowerCase().includes(q) ||
           p.content.toLowerCase().includes(q) ||
+          (p.notes ?? "").toLowerCase().includes(q) ||
           p.tags.some((t) => t.toLowerCase().includes(q))
       );
     }

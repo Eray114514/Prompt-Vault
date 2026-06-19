@@ -41,14 +41,26 @@ export async function OPTIONS() {
 }
 
 function isValidCategory(value: unknown): value is ValidCategory {
-  return typeof value === "string" && VALID_CATEGORIES.includes(value as ValidCategory);
+  return (
+    typeof value === "string" &&
+    VALID_CATEGORIES.includes(value as ValidCategory)
+  );
 }
 
-function matchQuery(prompt: { title: string; content: string; tags: string[] }, q: string) {
+function matchQuery(
+  prompt: {
+    title: string;
+    content: string;
+    notes?: string | null;
+    tags: string[];
+  },
+  q: string
+) {
   const lower = q.toLowerCase();
   return (
     prompt.title.toLowerCase().includes(lower) ||
     prompt.content.toLowerCase().includes(lower) ||
+    (prompt.notes ?? "").toLowerCase().includes(lower) ||
     prompt.tags.some((tag) => tag.toLowerCase().includes(lower))
   );
 }
@@ -56,6 +68,7 @@ function matchQuery(prompt: { title: string; content: string; tags: string[] }, 
 type ApiPromptRow = {
   title: string;
   content: string;
+  notes: string;
   category: string;
   tags: string[];
   is_favorite: boolean;
@@ -86,14 +99,16 @@ export async function GET(request: NextRequest) {
   const buildQuery = (isFavorite: boolean) =>
     supabase
       .from("prompts")
-      .select("title,content,category,tags,is_favorite")
+      .select("title,content,notes,category,tags,is_favorite")
       .eq("is_favorite", isFavorite)
       .in("category", categories)
       .order("updated_at", { ascending: false })
       .returns<ApiPromptRow[]>();
 
-  const [{ data: favorites, error: favError }, { data: nonFavorites, error: nonFavError }] =
-    await Promise.all([buildQuery(true), buildQuery(false)]);
+  const [
+    { data: favorites, error: favError },
+    { data: nonFavorites, error: nonFavError },
+  ] = await Promise.all([buildQuery(true), buildQuery(false)]);
 
   if (favError || nonFavError) {
     return jsonResponse(
@@ -139,7 +154,7 @@ export async function POST(request: NextRequest) {
     return jsonResponse({ error: "Invalid JSON body" }, 400);
   }
 
-  const { title, content, category, tags } = body;
+  const { title, content, notes, category, tags } = body;
 
   if (!title || typeof title !== "string" || !title.trim()) {
     return jsonResponse({ error: "title is required" }, 400);
@@ -159,6 +174,7 @@ export async function POST(request: NextRequest) {
   const payload: NewPrompt = {
     title: title.trim(),
     content: content.trim(),
+    notes: typeof notes === "string" ? notes.trim() : "",
     category,
     tags: Array.isArray(tags)
       ? tags.filter((tag): tag is string => typeof tag === "string")
