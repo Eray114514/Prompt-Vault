@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useRef } from "react";
 import type { Prompt, NewPrompt, Category } from "@/lib/types";
-import { CATEGORIES, CATEGORY_COLORS } from "@/lib/types";
+import { CATEGORIES, CATEGORY_COLORS, PROMPT_LIMITS } from "@/lib/types";
 import { CloseIcon } from "./Icons";
+import { useFocusTrap } from "./useFocusTrap";
 
 const DEFAULT_CATEGORY: Category = "image_generation";
 
@@ -30,6 +31,9 @@ export function PromptModal({
   const [tagInput, setTagInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const tagInputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useFocusTrap(dialogRef, true);
 
   useEffect(() => {
     if (prompt) {
@@ -65,11 +69,11 @@ export function PromptModal({
   const addTag = (raw: string) => {
     const value = raw.trim();
     if (!value) return;
-    if (tags.includes(value)) {
+    if (tags.includes(value) || tags.length >= PROMPT_LIMITS.tagCount) {
       setTagInput("");
       return;
     }
-    setTags((prev) => [...prev, value]);
+    setTags((prev) => [...prev, value.slice(0, PROMPT_LIMITS.tagLength)]);
     setTagInput("");
   };
 
@@ -99,13 +103,17 @@ export function PromptModal({
       .filter(Boolean);
     const newTags = parts.filter((p) => !tags.includes(p));
     if (newTags.length > 0) {
-      setTags((prev) => [...prev, ...newTags]);
+      setTags((prev) =>
+        [...prev, ...newTags]
+          .slice(0, PROMPT_LIMITS.tagCount)
+          .map((tag) => tag.slice(0, PROMPT_LIMITS.tagLength))
+      );
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !content.trim()) return;
+    if (!title.trim() || !content.trim() || submitting) return;
     setSubmitting(true);
     try {
       await onSubmit({
@@ -122,11 +130,15 @@ export function PromptModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 animate-fade-in"
+      className="animate-fade-in fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 sm:p-4"
       onClick={onClose}
     >
       <div
-        className="glass-strong flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl shadow-2xl animate-scale-in"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="prompt-modal-title"
+        className="glass-strong animate-scale-in flex max-h-[92dvh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 顶部霓虹条 */}
@@ -139,11 +151,16 @@ export function PromptModal({
         />
 
         <div className="flex shrink-0 items-center justify-between border-b border-border-subtle/60 px-5 py-4">
-          <h2 className="font-display text-lg font-medium tracking-wide text-white">
+          <h2
+            id="prompt-modal-title"
+            className="font-display text-lg font-medium tracking-wide text-white"
+          >
             {prompt ? "编辑档案" : "新建档案"}
           </h2>
           <button
+            type="button"
             onClick={onClose}
+            aria-label="关闭"
             className="rounded-md p-1.5 text-text-muted transition hover:bg-bg-hover hover:text-text-primary"
           >
             <CloseIcon size={18} />
@@ -156,23 +173,28 @@ export function PromptModal({
         >
           <div className="space-y-4 border-b border-border-subtle/60 p-5 lg:border-b-0 lg:border-r lg:p-6">
             <div>
-              <label className="mb-1.5 block text-[11px] uppercase tracking-wider text-text-muted">
+              <label
+                htmlFor="prompt-title"
+                className="mb-1.5 block text-[11px] tracking-wider text-text-muted"
+              >
                 标题
               </label>
               <input
+                id="prompt-title"
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="给这个提示词起个名字"
+                maxLength={PROMPT_LIMITS.title}
                 autoFocus
                 className="h-10 w-full rounded-lg border border-border-subtle bg-bg-input px-3.5 text-sm text-text-primary placeholder-text-muted transition focus:border-accent"
               />
             </div>
 
-            <div>
-              <label className="mb-2 block text-[11px] uppercase tracking-wider text-text-muted">
+            <fieldset>
+              <legend className="mb-2 block text-[11px] tracking-wider text-text-muted">
                 分类
-              </label>
+              </legend>
               <div className="grid grid-cols-2 gap-2">
                 {CATEGORIES.map((cat) => {
                   const color = CATEGORY_COLORS[cat.value];
@@ -182,6 +204,7 @@ export function PromptModal({
                       key={cat.value}
                       type="button"
                       onClick={() => setCategory(cat.value)}
+                      aria-pressed={active}
                       className={`rounded-lg border px-3 py-2 text-center text-xs font-medium transition-all duration-200 ${
                         active
                           ? "text-black"
@@ -202,10 +225,13 @@ export function PromptModal({
                   );
                 })}
               </div>
-            </div>
+            </fieldset>
 
             <div>
-              <label className="mb-1.5 block text-[11px] uppercase tracking-wider text-text-muted">
+              <label
+                htmlFor="prompt-tags"
+                className="mb-1.5 block text-[11px] tracking-wider text-text-muted"
+              >
                 标签
               </label>
               <div
@@ -222,13 +248,14 @@ export function PromptModal({
                       type="button"
                       onClick={() => removeTag(idx)}
                       className="rounded text-text-muted hover:text-white"
-                      aria-label="删除标签"
+                      aria-label={`删除标签 ${tag}`}
                     >
                       ×
                     </button>
                   </span>
                 ))}
                 <input
+                  id="prompt-tags"
                   ref={tagInputRef}
                   type="text"
                   value={tagInput}
@@ -237,23 +264,30 @@ export function PromptModal({
                   onBlur={handleTagBlur}
                   onPaste={handlePaste}
                   placeholder={tags.length === 0 ? "输入后回车添加" : ""}
+                  maxLength={PROMPT_LIMITS.tagLength}
+                  aria-describedby="prompt-tags-hint"
                   className="min-w-[80px] flex-1 bg-transparent py-1 text-sm text-text-primary placeholder-text-muted outline-none"
                 />
               </div>
-              <p className="mt-1.5 text-[10px] text-text-muted">
-                按 Enter 添加，支持粘贴逗号/换行分隔的多标签
+              <p id="prompt-tags-hint" className="mt-1.5 text-[11px] text-text-muted">
+                按 Enter 添加，支持粘贴逗号/换行分隔的多标签（最多 {PROMPT_LIMITS.tagCount} 个）
               </p>
             </div>
 
             <div>
-              <label className="mb-1.5 block text-[11px] uppercase tracking-wider text-text-muted">
+              <label
+                htmlFor="prompt-notes"
+                className="mb-1.5 block text-[11px] tracking-wider text-text-muted"
+              >
                 备注
               </label>
               <textarea
+                id="prompt-notes"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="补充用途、参数、图片说明或注意事项..."
                 rows={6}
+                maxLength={PROMPT_LIMITS.notes}
                 className="min-h-[120px] w-full resize-y rounded-lg border border-border-subtle bg-bg-input px-3.5 py-3 text-sm leading-relaxed text-text-primary placeholder-text-muted transition focus:border-accent lg:min-h-[160px]"
               />
             </div>
@@ -261,14 +295,19 @@ export function PromptModal({
 
           <div className="flex min-h-0 flex-col gap-4 p-5 lg:p-6">
             <div className="flex min-h-[320px] flex-1 flex-col">
-              <label className="mb-1.5 block text-[11px] uppercase tracking-wider text-text-muted">
+              <label
+                htmlFor="prompt-content"
+                className="mb-1.5 block text-[11px] tracking-wider text-text-muted"
+              >
                 内容
               </label>
               <textarea
+                id="prompt-content"
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
                 placeholder="粘贴或输入提示词内容..."
                 rows={14}
+                maxLength={PROMPT_LIMITS.content}
                 className="min-h-[280px] w-full flex-1 resize-y rounded-lg border border-border-subtle bg-bg-input px-3.5 py-3 font-mono text-sm leading-relaxed text-text-primary placeholder-text-muted transition focus:border-accent"
               />
             </div>

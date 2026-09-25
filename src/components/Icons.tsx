@@ -160,6 +160,70 @@ export function ArrowLeftIcon({ size, ...props }: IconProps) {
   );
 }
 
+export function LockIcon({ size, ...props }: IconProps) {
+  return (
+    <svg {...Svg({ size, ...props })}>
+      <rect x="4" y="10" width="16" height="11" rx="2" />
+      <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+    </svg>
+  );
+}
+
+export function EyeIcon({ size, ...props }: IconProps) {
+  return (
+    <svg {...Svg({ size, ...props })}>
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+export function EyeOffIcon({ size, ...props }: IconProps) {
+  return (
+    <svg {...Svg({ size, ...props })}>
+      <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+      <path d="M6.61 6.61A13.5 13.5 0 0 0 2 12s3.5 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+      <path d="M14.12 14.12A3 3 0 1 1 9.88 9.88" />
+      <path d="m2 2 20 20" />
+    </svg>
+  );
+}
+
+export function MenuIcon({ size, ...props }: IconProps) {
+  return (
+    <svg {...Svg({ size, ...props })}>
+      <path d="M4 6h16M4 12h16M4 18h16" />
+    </svg>
+  );
+}
+
+export function LogOutIcon({ size, ...props }: IconProps) {
+  return (
+    <svg {...Svg({ size, ...props })}>
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <path d="m16 17 5-5-5-5M21 12H9" />
+    </svg>
+  );
+}
+
+export function UndoIcon({ size, ...props }: IconProps) {
+  return (
+    <svg {...Svg({ size, ...props })}>
+      <path d="M3 7v6h6" />
+      <path d="M3 13a9 9 0 1 0 3-7.7L3 7" />
+    </svg>
+  );
+}
+
+export function AlertIcon({ size, ...props }: IconProps) {
+  return (
+    <svg {...Svg({ size, ...props })}>
+      <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+      <path d="M12 9v4M12 17h.01" />
+    </svg>
+  );
+}
+
 const ICON_MAP: Record<string, React.FC<IconProps>> = {
   all: AllIcon,
   star: StarIcon,

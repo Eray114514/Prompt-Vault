@@ -9,7 +9,8 @@ interface PromptCardProps {
   prompt: Prompt;
   onCopy: (content: string) => void;
   onEdit: (p: Prompt) => void;
-  onDelete: (id: string) => void;
+  /** 传整条记录而不是 id —— 删除现在是延迟提交的，撤销时需要把内容放回去 */
+  onDelete: (p: Prompt) => void;
   onToggleFavorite: (id: string, current: boolean) => void;
   index?: number;
 }
@@ -50,9 +51,10 @@ export function PromptCard({
       : noteLinePreview;
   const isNotesLong =
     Boolean(notes) &&
-    (noteLines.length > NOTE_PREVIEW_LINES ||
-      notes!.length > notePreview.length);
+    (noteLines.length > NOTE_PREVIEW_LINES || notes!.length > notePreview.length);
   const notesToShow = notesExpanded ? notes : notePreview;
+
+  const createdAt = new Date(prompt.created_at);
 
   return (
     <div
@@ -77,18 +79,22 @@ export function PromptCard({
           {prompt.title}
         </h3>
         <button
+          type="button"
           onClick={() => onToggleFavorite(prompt.id, prompt.is_favorite)}
           className={`shrink-0 rounded-md p-1 transition ${
             prompt.is_favorite
               ? "text-fav"
               : "text-text-muted hover:text-text-secondary"
           }`}
-          title={prompt.is_favorite ? "取消收藏" : "收藏"}
+          aria-label={prompt.is_favorite ? "取消收藏" : "收藏"}
+          aria-pressed={prompt.is_favorite}
         >
           <StarIcon
             size={17}
             filled={prompt.is_favorite}
-            className={prompt.is_favorite ? "drop-shadow-[0_0_6px_rgba(255,214,0,0.6)]" : ""}
+            className={
+              prompt.is_favorite ? "drop-shadow-[0_0_6px_rgba(255,214,0,0.6)]" : ""
+            }
           />
         </button>
       </div>
@@ -96,7 +102,7 @@ export function PromptCard({
       {/* 分类 & 标签 */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <span
-          className="rounded-full border px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider"
+          className="rounded-full border px-2.5 py-0.5 text-[11px] font-medium tracking-wider"
           style={{
             borderColor: `${catColor}40`,
             color: catColor,
@@ -108,13 +114,13 @@ export function PromptCard({
         {prompt.tags.slice(0, 4).map((tag) => (
           <span
             key={tag}
-            className="rounded-md bg-bg-hover px-2 py-0.5 text-[10px] text-text-muted"
+            className="rounded-md bg-bg-hover px-2 py-0.5 text-[11px] text-text-muted"
           >
             {tag}
           </span>
         ))}
         {prompt.tags.length > 4 && (
-          <span className="text-[10px] text-text-muted">
+          <span className="text-[11px] text-text-muted">
             +{prompt.tags.length - 4}
           </span>
         )}
@@ -123,14 +129,13 @@ export function PromptCard({
       {notes && (
         <div className="mb-4 rounded-md border border-border-subtle/50 bg-bg-hover/50 px-3 py-2 text-xs leading-relaxed text-text-secondary">
           <div className="mb-1 flex items-center justify-between gap-3">
-            <span className="text-[10px] uppercase tracking-wider text-text-muted">
-              备注
-            </span>
+            <span className="text-[11px] tracking-wider text-text-muted">备注</span>
             {isNotesLong && (
               <button
                 type="button"
                 onClick={() => setNotesExpanded((prev) => !prev)}
-                className="shrink-0 text-[10px] uppercase tracking-wider transition hover:text-text-primary"
+                aria-expanded={notesExpanded}
+                className="shrink-0 text-[11px] tracking-wider transition hover:text-text-primary"
                 style={{ color: catColor }}
               >
                 {notesExpanded ? "收起" : "展开"}
@@ -154,16 +159,32 @@ export function PromptCard({
 
       {/* 内容 */}
       <div
-        className="mb-4 flex-1 cursor-text whitespace-pre-wrap break-words rounded-md border border-border-subtle/40 bg-bg-base/50 p-3 font-mono text-xs leading-relaxed text-text-secondary"
-        onClick={() => isLong && setExpanded(!expanded)}
+        className={`mb-4 flex-1 whitespace-pre-wrap break-words rounded-md border border-border-subtle/40 bg-bg-base/50 p-3 font-mono text-xs leading-relaxed text-text-secondary ${
+          isLong
+            ? "cursor-pointer transition-colors hover:border-border-hover"
+            : "cursor-text"
+        } ${expanded && isLong ? "max-h-[60vh] overflow-y-auto pr-2 scrollbar-thin" : ""}`}
+        {...(isLong
+          ? {
+              role: "button",
+              tabIndex: 0,
+              "aria-expanded": expanded,
+              "aria-label": expanded ? "收起提示词内容" : "展开完整提示词内容",
+              onClick: () => setExpanded((prev) => !prev),
+              onKeyDown: (event: React.KeyboardEvent) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  setExpanded((prev) => !prev);
+                }
+              },
+            }
+          : {})}
       >
         {contentPreview}
-        {isLong && !expanded && (
-          <span className="text-text-muted"> ...</span>
-        )}
+        {isLong && !expanded && <span className="text-text-muted"> ...</span>}
         {isLong && expanded && (
           <span
-            className="ml-1 cursor-pointer font-body text-[11px] uppercase tracking-wider"
+            className="ml-1 font-body text-[11px] tracking-wider"
             style={{ color: catColor }}
           >
             收起
@@ -173,16 +194,21 @@ export function PromptCard({
 
       {/* 底部操作 */}
       <div className="mt-auto flex items-center justify-between border-t border-border-subtle/60 pt-4">
-        <span className="text-[10px] uppercase tracking-wider text-text-muted">
-          {new Date(prompt.created_at).toLocaleDateString("zh-CN", {
+        <time
+          dateTime={prompt.created_at}
+          className="text-[11px] tracking-wider text-text-muted"
+        >
+          {createdAt.toLocaleDateString("zh-CN", {
             year: "2-digit",
             month: "2-digit",
             day: "2-digit",
           })}
-        </span>
+        </time>
         <div className="flex items-center gap-1">
           <button
+            type="button"
             onClick={handleCopy}
+            aria-label="复制提示词内容"
             className={`btn rounded-md px-2.5 py-1.5 text-xs ${
               copied
                 ? "bg-fav-soft text-fav"
@@ -193,18 +219,18 @@ export function PromptCard({
             {copied ? "已复制" : "复制"}
           </button>
           <button
+            type="button"
             onClick={() => onEdit(prompt)}
+            aria-label={`编辑「${prompt.title}」`}
             className="btn rounded-md p-1.5 text-text-muted hover:bg-bg-hover hover:text-text-primary"
-            title="编辑"
           >
             <PencilIcon size={14} />
           </button>
           <button
-            onClick={() => {
-              if (confirm("确认删除此提示词？")) onDelete(prompt.id);
-            }}
+            type="button"
+            onClick={() => onDelete(prompt)}
+            aria-label={`删除「${prompt.title}」`}
             className="btn rounded-md p-1.5 text-text-muted hover:bg-red-500/10 hover:text-red-400"
-            title="删除"
           >
             <TrashIcon size={14} />
           </button>

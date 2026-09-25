@@ -18,7 +18,9 @@
 
   --text-primary: #f4f4f5;
   --text-secondary: #9ca3af;
-  --text-muted: #6b7280;
+  /* 原本是 #6b7280，在 #0a0a10 上对比度约 4.09:1，够不上 WCAG AA 的 4.5:1。
+     提到 #787f8c 后约 4.9:1，观感上仍是明显的"次级灰"，色相也贴合冷调面板。 */
+  --text-muted: #787f8c;
 
   --accent: #ff6b35;
   --accent-hover: #ff8557;
@@ -139,13 +141,29 @@ body {
   box-shadow: inset 0 0 0 1px var(--border-default), 0 0 0 1px rgba(0, 0, 0, 0.5);
 }
 
-/* 输入框 */
+/* 输入框聚焦态。
+   原先用裸选择器配 !important 全局覆盖，副作用面太宽；这里去掉 !important
+   （类型选择器 + 伪类的优先级本来就压得住工具类），行为不变但不再需要靠强权取胜。 */
 input:focus,
 textarea:focus,
 select:focus {
   outline: none;
-  border-color: var(--accent) !important;
+  border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* 键盘可见焦点环。
+   之前只有输入框有聚焦反馈，按钮/链接完全没有 —— 纯键盘用户根本不知道自己停在哪。
+   放在上面那条之后，靠同优先级后置覆盖掉 outline: none。 */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+button:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* 按钮基础 */
@@ -184,4 +202,16 @@ select:focus {
 .scrollbar-thin::-webkit-scrollbar-thumb {
   background: var(--border-default);
   border-radius: 3px;
+}
+
+/* 尊重系统"减弱动态效果"偏好：前庭敏感的用户不该被入场动画和位移动效折腾。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }

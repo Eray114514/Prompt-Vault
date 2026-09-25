@@ -30,7 +30,11 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# workbuddy / agent 工作数据
+.workbuddy/
+
 # screenshots
 *.png
 *.jpg
 *.jpeg
+!design_preview.png
