@@ -579,6 +579,7 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
           defaultCategory={
             filter !== "all" && filter !== "favorites" ? filter : undefined
           }
+          initialTags={selectedTags}
           prefillContent={prefillContent}
           tagSuggestions={tagSuggestions}
           onSubmit={handleSubmit}

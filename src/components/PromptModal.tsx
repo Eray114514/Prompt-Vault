@@ -12,8 +12,14 @@ const MAX_SUGGESTIONS = 8;
 interface PromptModalProps {
   prompt: Prompt | null;
   defaultCategory?: Category;
+  /**
+   * 新建时默认带入的标签 —— 取当前侧栏选中的标签。
+   * 这是标签版的"位置继承"：点进某个分类再新建，分类会自动填好；
+   * 标签也必须如此，否则归类的成本全落在每次手打上。
+   */
+  initialTags?: string[];
   prefillContent?: string;
-  /** 全量标签（父级聚合后传入）。弹窗只拿得到单条 prompt，自己算不出候选。 */
+  /** 全量标签（父级聚合后传入，按使用次数降序）。弹窗只拿得到单条 prompt，自己算不出候选。 */
   tagSuggestions?: string[];
   onSubmit: (data: NewPrompt) => Promise<void>;
   onClose: () => void;
@@ -22,6 +28,7 @@ interface PromptModalProps {
 export function PromptModal({
   prompt,
   defaultCategory,
+  initialTags,
   prefillContent,
   tagSuggestions = [],
   onSubmit,
@@ -39,6 +46,9 @@ export function PromptModal({
 
   const tagInputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  // 只在挂载时快照一次带入的标签。若直接把它写进下面 useEffect 的依赖，
+  // 父组件任何一次重渲染都会重置草稿 —— 用户改到一半的标签会被抹掉。
+  const inheritedTagsRef = useRef<string[]>(initialTags ?? []);
   // 用一个 ref 镜像下拉开关状态：全局 Escape 监听是原生监听，
   // 读 state 会读到本次事件之前的旧值。
   const suggestOpenRef = useRef(false);
@@ -52,18 +62,13 @@ export function PromptModal({
       setNotes(prompt.notes ?? "");
       setCategory(prompt.category);
       setTags(prompt.tags);
-    } else if (prefillContent) {
-      setTitle("");
-      setContent(prefillContent);
-      setNotes("");
-      setCategory(defaultCategory ?? DEFAULT_CATEGORY);
-      setTags([]);
     } else {
+      // 新建：分类与标签都继承当前筛选的位置
       setTitle("");
-      setContent("");
+      setContent(prefillContent ?? "");
       setNotes("");
       setCategory(defaultCategory ?? DEFAULT_CATEGORY);
-      setTags([]);
+      setTags(inheritedTagsRef.current);
     }
     setTagInput("");
     setSuggestOpen(false);
@@ -87,8 +92,11 @@ export function PromptModal({
 
   const suggestions = useMemo(() => {
     const query = tagInput.trim().toLowerCase();
-    if (!query) return [];
     const pool = tagSuggestions.filter((tag) => !tags.includes(tag));
+    // 未输入时给出最常用的几个 —— 让"零输入点选"成立。
+    // 否则加个标签得先凭记忆敲字，还得敲得和以前一字不差，
+    // 否则同一个项目会裂成 "Deep Space" / "deep-space" / "deepspace" 三份。
+    if (!query) return pool.slice(0, MAX_SUGGESTIONS);
     const startsWith = pool.filter((tag) => tag.toLowerCase().startsWith(query));
     const contains = pool.filter(
       (tag) =>
@@ -298,7 +306,9 @@ export function PromptModal({
                 htmlFor="prompt-tags"
                 className="mb-1.5 block text-[11px] tracking-wider text-text-muted"
               >
-                标签
+                {!prompt && inheritedTagsRef.current.length > 0
+                  ? "标签 · 已带入当前筛选"
+                  : "标签"}
               </label>
               <div className="relative">
                 <div
@@ -335,7 +345,7 @@ export function PromptModal({
                     onKeyDown={handleTagKeyDown}
                     onBlur={handleTagBlur}
                     onPaste={handlePaste}
-                    placeholder={tags.length === 0 ? "输入后回车添加" : ""}
+                    placeholder={tags.length === 0 ? "输入或点选下方标签" : ""}
                     maxLength={PROMPT_LIMITS.tagLength}
                     autoComplete="off"
                     role="combobox"
