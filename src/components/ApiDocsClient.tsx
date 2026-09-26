@@ -335,6 +335,55 @@ ${categoryList}
             <CodeBlock code={createExample} label="cURL 示例" />
           </section>
 
+          {/* Export */}
+          <section>
+            <div className="mb-3 flex items-center gap-3">
+              <span className="rounded-md bg-green-500/15 px-2 py-1 text-xs font-semibold text-green-400">
+                GET
+              </span>
+              <h2 className="font-display text-lg text-white">
+                整库导出（需要密钥）
+              </h2>
+            </div>
+            <p className="mb-3 text-sm text-text-secondary">
+              备份用。与{" "}
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                GET /api/prompts
+              </code>{" "}
+              不同，它<span className="font-medium text-text-primary">不公开</span>{" "}
+              —— 接受{" "}
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                API_SECRET
+              </code>{" "}
+              或{" "}
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                CRON_SECRET
+              </code>
+              ，两者都未配置时返回 503。它按每页 1000 行分页取全量，不会因为
+              PostgREST 的单次返回上限而漏数据。
+            </p>
+            <p className="mb-3 text-sm text-text-secondary">
+              参数：
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                format=json|md
+              </code>
+              （默认 json）、
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                notes=1|0
+              </code>
+              （默认含备注）。
+            </p>
+            <CodeBlock
+              code={`curl -H "Authorization: Bearer YOUR_API_SECRET" \\
+  "${baseUrl}/api/export?format=json" -o prompt-vault.json`}
+              label="cURL 示例"
+            />
+            <p className="mt-3 text-xs leading-relaxed text-text-muted">
+              恢复方式：本期不提供导入端点 —— 对偶发操作来说那是没必要扩大的攻击面。
+              逐条重新 <code className="rounded bg-bg-elevated px-1 py-0.5">POST /api/prompts</code> 即可。
+            </p>
+          </section>
+
           {/* Categories */}
           <section>
             <h2 className="mb-3 font-display text-lg text-white">分类取值</h2>

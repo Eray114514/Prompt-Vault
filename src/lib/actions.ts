@@ -14,14 +14,33 @@ function assertId(id: unknown): string | null {
   return id;
 }
 
+const PROMPTS_PAGE_SIZE = 1000;
+/** 防御性上限：50 页 = 5 万条，避免分页循环因为意外返回值而无限转。 */
+const PROMPTS_MAX_PAGES = 50;
+
 export async function getPrompts(): Promise<Prompt[]> {
   noStore();
-  const { data, error } = await supabase
-    .from("prompts")
-    .select("*")
-    .order("created_at", { ascending: false });
-  if (error) throw new Error(error.message);
-  return (data ?? []) as Prompt[];
+
+  // 必须分页取全量：PostgREST 单次最多返回 1000 行，超限是**静默截断** ——
+  // 直接 .select("*") 会让界面在库破千之后悄悄少数据，而且不报任何错。
+  const all: Prompt[] = [];
+
+  for (let page = 0; page < PROMPTS_MAX_PAGES; page += 1) {
+    const offset = page * PROMPTS_PAGE_SIZE;
+    const { data, error } = await supabase
+      .from("prompts")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .range(offset, offset + PROMPTS_PAGE_SIZE - 1);
+
+    if (error) throw new Error(error.message);
+
+    const rows = (data ?? []) as Prompt[];
+    all.push(...rows);
+    if (rows.length < PROMPTS_PAGE_SIZE) break;
+  }
+
+  return all;
 }
 
 export async function createPrompt(input: unknown): Promise<ActionResult<Prompt>> {

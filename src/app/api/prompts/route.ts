@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
-import { constantTimeEqual } from "@/lib/auth";
+import { secretMatches } from "@/lib/api-auth";
 import { parseNewPrompt } from "@/lib/prompts";
 import {
   MAX_FAVORITES_RETURNED,
@@ -43,21 +43,8 @@ function jsonResponse(body: unknown, status = 200, cacheSeconds = 0) {
   return NextResponse.json(body, { status, headers });
 }
 
-async function sha256Hex(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(value)
-  );
-  return Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-/** 先哈希再比，两边长度恒为 64，比较过程不泄露长度或前缀信息。 */
-async function secretMatches(provided: string, expected: string): Promise<boolean> {
-  const [a, b] = await Promise.all([sha256Hex(provided), sha256Hex(expected)]);
-  return constantTimeEqual(a, b);
-}
+// sha256Hex + secretMatches 已抽到 @/lib/api-auth，与 /api/export 共用同一份实现，
+// 避免将来改安全策略时只改到一处。
 
 /**
  * 把用户输入整理成能安全嵌进 PostgREST `or=(...)` 的字面量。

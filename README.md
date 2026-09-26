@@ -125,6 +125,7 @@ Three deliberate layers, each with a different trade-off:
 | Web UI (`/`, `/api-docs`) | Password → signed session cookie, enforced in `src/middleware.ts` **and** re-checked in every Server Action | Only you see the front end |
 | `GET /api/prompts` | **None** | Any cloud agent, anywhere, can read without plumbing a key. Public readability is an accepted trade-off. |
 | `POST /api/prompts` | `Authorization: Bearer <API_SECRET>`, always | No anonymous path to mutate data |
+| `GET /api/export` | `Bearer <API_SECRET>` or `<CRON_SECRET>`; **503 when neither is configured** | It is a whole-library dump — it must never be public |
 
 **Session lifetime.** Browsers cap cookie expiry at 400 days (Chrome silently truncates anything longer), so "permanent" is implemented as a 400-day cookie plus sliding renewal: once the token is older than 30 days, the next request reissues it. As long as you visit occasionally, you never log in twice.
 
@@ -134,6 +135,41 @@ Three deliberate layers, each with a different trade-off:
 3. `metadata.robots` on the root layout and on `/login` / `/api-docs`
 
 Note that `robots.txt` is a convention, not enforcement. The response header and meta tag are what actually keep pages out of indexes.
+
+---
+
+## 💾 Export & Backup
+
+`GET /api/export` dumps the entire library. Unlike `GET /api/prompts`, it is **never public**:
+
+| Condition | Response |
+|-----------|----------|
+| Neither `API_SECRET` nor `CRON_SECRET` is set | **503** — refuse to serve |
+| Missing or wrong bearer token | 401 |
+| `Authorization: Bearer <API_SECRET>` or `<CRON_SECRET>` | 200 |
+
+Params: `format=json|md` (default `json`), `notes=1|0` (default `1`).
+
+```bash
+curl -H "Authorization: Bearer $API_SECRET" \
+  "https://your-domain/api/export?format=json" -o prompt-vault.json
+```
+
+It walks the table in 1000-row pages. That is not incidental: PostgREST truncates silently at 1000 rows per request, and a backup that quietly drops records is worse than no backup at all.
+
+### Where backups land
+
+Vercel has no persistent disk, so nothing on the server can hold a file between runs. The recommended setup is **a local scheduled task that pulls the export**:
+
+- The endpoint is the always-available manual fallback.
+- A local cron / Task Scheduler job pulls it daily using `API_SECRET`. This keeps the failure domain separate from the app — a paused, deleted, or unpaid Supabase project cannot take the backup down with it — and it reuses whatever local backup routine you already run.
+- Supabase Storage is deliberately **not** used: it lives in the same project as the database, so one outage takes out both the data and its backup.
+
+### Restoring
+
+There is no import endpoint, on purpose — for a rare operation it would be an unnecessary expansion of the attack surface. To restore, read the exported JSON and re-create each record with `POST /api/prompts` and the bearer token.
+
+A backup without a restore path is only half a backup. If you change the export format, re-check that this still works.
 
 ---
 
@@ -293,6 +329,7 @@ npm start
 - 收藏筛选
 - **开放读取接口**：`GET /api/prompts` 无需任何密钥，云端 agent 随时随地可直接取用
 - **写入需要密钥**：`POST /api/prompts` 必须携带 Bearer 密钥
+- **整库导出**：`GET /api/export`（必须鉴权）用于备份，支持 JSON / Markdown
 - **不被搜索引擎收录**：robots.txt + X-Robots-Tag + 页面 meta 三重声明
 - 深色主题 + 霓虹索引卡视觉风格
 

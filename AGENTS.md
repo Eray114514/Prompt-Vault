@@ -46,6 +46,7 @@ src/
   components/           ← Client components only (PromptVault is the root client shell)
   lib/
     auth.ts             ← 会话令牌生成/校验；纯 Web Crypto，Edge 安全，无 Node 依赖
+    api-auth.ts         ← Bearer 鉴权（sha256 + 定长比对），两个 API 路由共用
     session.ts          ← getSession / requireSession（写操作守卫）
     auth-actions.ts     ← 登录 / 登出 Server Actions
     prompts.ts          ← 输入校验（parseNewPrompt）+ 排序，UI 与 API 共用
@@ -61,10 +62,13 @@ src/
 | Web UI (`/`, `/api-docs`) | Password → signed session cookie. Enforced in `middleware.ts` **and** re-checked by `requireSession()` inside every Server Action. |
 | `GET /api/prompts` | **None, by design.** Cloud agents must be able to read without a key. Public readability is an accepted trade-off. |
 | `POST /api/prompts` | `Authorization: Bearer <API_SECRET>`, always. If `API_SECRET` is unset the route returns **503**, never an unauthenticated write. |
+| `GET /api/export` | `Bearer <API_SECRET>` or `<CRON_SECRET>`. **503 when neither is configured.** Whole-library dump — never make it public. |
 
 Key constraints when touching auth:
 
+- **`middleware.ts` has an explicit whitelist** (`api/prompts`, `api/export`, `login`, `robots.txt`, `_next/*`, icons). Adding a new API route means adding it there too — otherwise callers without a session cookie (cron, curl, cloud agents) get a 307 to `/login` and the handler never runs. Whitelisted routes are publicly *reachable*, so their own fail-closed 503/401 is the only thing protecting them. Never let the 503 degrade into "serve anyway".
 - `src/lib/auth.ts` must stay free of `next/headers` and Node built-ins — middleware imports it and runs on the Edge.
+- Bearer comparison lives in **`src/lib/api-auth.ts`** and is shared by both API routes. Don't grow a second copy.
 - Browsers cap cookie expiry at 400 days, so "permanent login" is a 400-day cookie plus sliding renewal (`RENEW_AFTER_MS`). Don't try to raise `maxAge` beyond 400 days; it gets silently truncated.
 - When `APP_PASSWORD` is missing the site **fails closed**: nobody can log in. That is intentional — never "fall back" to allowing anonymous access.
 
