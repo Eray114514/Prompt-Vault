@@ -3,7 +3,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import type { ActionResult, Prompt, NewPrompt, FilterKey } from "@/lib/types";
-import { NAV_ITEMS } from "@/lib/types";
+import { CATEGORY_LABELS, NAV_ITEMS } from "@/lib/types";
 import {
   createPrompt,
   updatePrompt,
@@ -28,9 +28,22 @@ const UNDO_WINDOW_MS = 6000;
 const REFRESH_THROTTLE_MS = 15000;
 const TOAST_DURATION_MS = 2600;
 
-interface PendingDelete {
-  prompt: Prompt;
-  timer: ReturnType<typeof setTimeout>;
+/** 搜索：标题 / 正文 / 备注 / 标签之间的 OR 子串匹配。空查询视为命中。 */
+function matchesSearch(prompt: Prompt, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return (
+    prompt.title.toLowerCase().includes(q) ||
+    prompt.content.toLowerCase().includes(q) ||
+    (prompt.notes ?? "").toLowerCase().includes(q) ||
+    prompt.tags.some((tag) => tag.toLowerCase().includes(q))
+  );
+}
+
+function matchesCategoryFilter(prompt: Prompt, filter: FilterKey): boolean {
+  if (filter === "favorites") return prompt.is_favorite;
+  if (filter === "all") return true;
+  return prompt.category === filter;
 }
 
 /**
@@ -40,6 +53,14 @@ interface PendingDelete {
 function isRedirectError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return message.includes("NEXT_REDIRECT") || message.includes("NEXT_NOT_FOUND");
+}
+
+/** 空结果时给出的"放宽条件后能找到什么"的可点出口。 */
+interface ReliefOption {
+  key: string;
+  label: string;
+  count: number;
+  apply: () => void;
 }
 
 export function PromptVault({ initialPrompts }: PromptVaultProps) {
@@ -55,7 +76,12 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const pendingDeletesRef = useRef<Map<string, PendingDelete>>(new Map());
+  // 待删除的批次。刻意只留一个批次定时器：连删多条合并成一次提交 + 一次撤销，
+  // 而不是每条各弹一个带按钮的 toast（那会变成视觉噪音）。
+  const pendingDeletesRef = useRef<Map<string, Prompt>>(new Map());
+  const deleteBatchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const deleteToastIdRef = useRef<number | null>(null);
+
   const toastIdRef = useRef(0);
   const toastTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(
     new Map()
@@ -71,6 +97,18 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
+  const armToastTimer = useCallback(
+    (id: number, duration: number) => {
+      const existing = toastTimersRef.current.get(id);
+      if (existing) clearTimeout(existing);
+      toastTimersRef.current.set(
+        id,
+        setTimeout(() => dismissToast(id), duration)
+      );
+    },
+    [dismissToast]
+  );
+
   const pushToast = useCallback(
     (
       text: string,
@@ -79,14 +117,21 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
     ) => {
       const id = (toastIdRef.current += 1);
       setToasts((prev) => [...prev, { id, text, type, action: options?.action }]);
-      const timer = setTimeout(
-        () => dismissToast(id),
-        options?.duration ?? TOAST_DURATION_MS
-      );
-      toastTimersRef.current.set(id, timer);
+      armToastTimer(id, options?.duration ?? TOAST_DURATION_MS);
       return id;
     },
-    [dismissToast]
+    [armToastTimer]
+  );
+
+  /** 原地更新已有 toast（用于"已删除 1 条"→"已删除 3 条"这种累积文案）。 */
+  const updateToast = useCallback(
+    (id: number, patch: Partial<Omit<ToastMessage, "id">>, duration?: number) => {
+      setToasts((prev) =>
+        prev.map((toast) => (toast.id === id ? { ...toast, ...patch } : toast))
+      );
+      if (duration !== undefined) armToastTimer(id, duration);
+    },
+    [armToastTimer]
   );
 
   /** 统一处理 Server Action 的返回：失败弹提示并返回 null，成功把 data 交出去。 */
@@ -137,41 +182,29 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
     };
   }, [router]);
 
-  // 卸载时立刻提交还在犹豫窗口里的删除（不 await：页面正在走，请求发出去就行；
-  // 万一被浏览器取消，记录会保留下来 —— 失败方向是安全的）。
+  // 卸载时把还在犹豫窗口里的删除一次性提交出去（不 await：页面正在走，
+  // 请求发出去就行；万一被浏览器取消，记录会保留 —— 失败方向是安全的）。
   useEffect(() => {
     const pending = pendingDeletesRef.current;
-    const timers = toastTimersRef.current;
+    const toastTimers = toastTimersRef.current;
     return () => {
-      pending.forEach((entry) => {
-        clearTimeout(entry.timer);
-        void deletePrompt(entry.prompt.id).catch(() => undefined);
+      if (deleteBatchTimerRef.current) clearTimeout(deleteBatchTimerRef.current);
+      pending.forEach((_prompt, id) => {
+        void deletePrompt(id).catch(() => undefined);
       });
       pending.clear();
-      timers.forEach((timer) => clearTimeout(timer));
-      timers.clear();
+      toastTimers.forEach((timer) => clearTimeout(timer));
+      toastTimers.clear();
     };
   }, []);
 
-  const filteredPrompts = useMemo(() => {
-    let result = prompts;
-    if (filter === "favorites") {
-      result = result.filter((p) => p.is_favorite);
-    } else if (filter !== "all") {
-      result = result.filter((p) => p.category === filter);
-    }
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      result = result.filter(
-        (p) =>
-          p.title.toLowerCase().includes(q) ||
-          p.content.toLowerCase().includes(q) ||
-          (p.notes ?? "").toLowerCase().includes(q) ||
-          p.tags.some((t) => t.toLowerCase().includes(q))
-      );
-    }
-    return result;
-  }, [prompts, filter, search]);
+  const filteredPrompts = useMemo(
+    () =>
+      prompts.filter(
+        (p) => matchesCategoryFilter(p, filter) && matchesSearch(p, search)
+      ),
+    [prompts, filter, search]
+  );
 
   const counts = useMemo(() => {
     const map: Record<string, number> = {
@@ -185,6 +218,72 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
     }
     return map;
   }, [prompts]);
+
+  const filterLabel = useMemo(() => {
+    if (filter === "all") return "全部";
+    if (filter === "favorites") return "收藏";
+    return CATEGORY_LABELS[filter];
+  }, [filter]);
+
+  /** 在给定的放宽条件下有多少命中。用于空结果时给可点的出口。 */
+  const countMatching = useCallback(
+    (next: { search: string; filter: FilterKey }) =>
+      prompts.filter(
+        (p) =>
+          matchesCategoryFilter(p, next.filter) && matchesSearch(p, next.search)
+      ).length,
+    [prompts]
+  );
+
+  // 空结果时，逐级放宽当前条件，给出真正有命中的方向。
+  // 原来这里只有一句"尝试切换分类或调整搜索词"的静态文案 —— 它告诉你该做什么，
+  // 却不给你按钮，等于把活留给用户。
+  const reliefOptions = useMemo<ReliefOption[]>(() => {
+    if (prompts.length === 0) return [];
+    if (filteredPrompts.length > 0) return [];
+
+    const hasSearch = search.trim().length > 0;
+    const hasCategory = filter !== "all";
+    const options: ReliefOption[] = [];
+
+    if (hasCategory && hasSearch) {
+      const count = countMatching({ search, filter: "all" });
+      if (count > 0) {
+        options.push({
+          key: "drop-category",
+          label: "在全部分类中搜索",
+          count,
+          apply: () => setFilter("all"),
+        });
+      }
+    }
+
+    if (hasSearch) {
+      const count = countMatching({ search: "", filter });
+      if (count > 0) {
+        options.push({
+          key: "drop-search",
+          label: hasCategory ? `只看「${filterLabel}」` : "清空搜索词",
+          count,
+          apply: () => setSearch(""),
+        });
+      }
+    }
+
+    if (hasCategory || hasSearch) {
+      options.push({
+        key: "reset",
+        label: "查看全部档案",
+        count: prompts.length,
+        apply: () => {
+          setSearch("");
+          setFilter("all");
+        },
+      });
+    }
+
+    return options.slice(0, 2);
+  }, [prompts, filteredPrompts.length, filter, search, filterLabel, countMatching]);
 
   const handleCreate = useCallback(
     async (data: NewPrompt) => {
@@ -222,59 +321,94 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
     [runAction, pushToast, router]
   );
 
-  const commitDelete = useCallback(
-    async (prompt: Prompt) => {
-      pendingDeletesRef.current.delete(prompt.id);
+  /** 把当前整批待删除一次性落库。失败的放回列表，不让界面上少一条而库里还留着。 */
+  const commitPendingDeletes = useCallback(async () => {
+    const entries = Array.from(pendingDeletesRef.current.entries());
+    pendingDeletesRef.current.clear();
 
-      const result = await runAction(
-        () => deletePrompt(prompt.id),
-        "删除失败"
-      );
-      if (result === null) {
-        // 删除没成功就把记录放回去，别让界面上少一条、库里还留着
-        setPrompts((prev) => sortByCreatedDesc([...prev, prompt]));
-        return;
-      }
+    if (deleteBatchTimerRef.current) {
+      clearTimeout(deleteBatchTimerRef.current);
+      deleteBatchTimerRef.current = null;
+    }
+    const toastId = deleteToastIdRef.current;
+    deleteToastIdRef.current = null;
+    if (toastId !== null) dismissToast(toastId);
+
+    if (entries.length === 0) return;
+
+    const results = await Promise.all(
+      entries.map(async ([id]) => {
+        try {
+          const result = await deletePrompt(id);
+          return { id, ok: result.ok };
+        } catch {
+          // 会话失效会走到这里（redirect 靠抛异常实现），本地回滚一下即可
+          return { id, ok: false };
+        }
+      })
+    );
+
+    const failedIds = new Set(results.filter((r) => !r.ok).map((r) => r.id));
+    if (failedIds.size === 0) {
       lastRefreshRef.current = Date.now();
-    },
-    [runAction]
-  );
+      return;
+    }
 
-  const undoDelete = useCallback(
-    (id: string) => {
-      const entry = pendingDeletesRef.current.get(id);
-      if (!entry) return;
-      clearTimeout(entry.timer);
-      pendingDeletesRef.current.delete(id);
-      setPrompts((prev) => sortByCreatedDesc([...prev, entry.prompt]));
-      pushToast("已恢复");
-    },
-    [pushToast]
-  );
+    const restore = entries
+      .filter(([id]) => failedIds.has(id))
+      .map(([, prompt]) => prompt);
+    setPrompts((prev) => sortByCreatedDesc([...prev, ...restore]));
+    pushToast(`${failedIds.size} 条删除失败，已恢复`, "error");
+  }, [dismissToast, pushToast]);
+
+  const undoPendingDeletes = useCallback(() => {
+    const restore = Array.from(pendingDeletesRef.current.values());
+    pendingDeletesRef.current.clear();
+
+    if (deleteBatchTimerRef.current) {
+      clearTimeout(deleteBatchTimerRef.current);
+      deleteBatchTimerRef.current = null;
+    }
+    const toastId = deleteToastIdRef.current;
+    deleteToastIdRef.current = null;
+    if (toastId !== null) dismissToast(toastId);
+
+    if (restore.length === 0) return;
+    setPrompts((prev) => sortByCreatedDesc([...prev, ...restore]));
+    pushToast(restore.length === 1 ? "已恢复" : `已恢复 ${restore.length} 条`);
+  }, [dismissToast, pushToast]);
 
   // 延迟提交 + 撤销。用时间差换掉了原来的 window.confirm —— 既不用弹系统对话框，
   // 也不需要给表加 deleted_at 字段（那会让"还没跑迁移"直接变成线上 500）。
+  //
+  // 连删时合并为一个批次：文案累积成"已删除 N 条"，落库时机顺延到最后一次删除之后。
   const handleDelete = useCallback(
     (prompt: Prompt) => {
       setPrompts((prev) => prev.filter((p) => p.id !== prompt.id));
+      pendingDeletesRef.current.set(prompt.id, prompt);
 
-      const timer = setTimeout(() => {
-        void commitDelete(prompt);
+      if (deleteBatchTimerRef.current) clearTimeout(deleteBatchTimerRef.current);
+      deleteBatchTimerRef.current = setTimeout(() => {
+        void commitPendingDeletes();
       }, UNDO_WINDOW_MS);
-      pendingDeletesRef.current.set(prompt.id, { prompt, timer });
 
-      const toastId = pushToast(`已删除「${prompt.title}」`, "success", {
-        duration: UNDO_WINDOW_MS,
-        action: {
-          label: "撤销",
-          onClick: () => {
-            dismissToast(toastId);
-            undoDelete(prompt.id);
-          },
-        },
-      });
+      const count = pendingDeletesRef.current.size;
+      const text = count === 1 ? `已删除「${prompt.title}」` : `已删除 ${count} 条`;
+      const action = {
+        label: count === 1 ? "撤销" : "撤销全部",
+        onClick: undoPendingDeletes,
+      };
+
+      if (deleteToastIdRef.current === null) {
+        deleteToastIdRef.current = pushToast(text, "success", {
+          duration: UNDO_WINDOW_MS,
+          action,
+        });
+      } else {
+        updateToast(deleteToastIdRef.current, { text, action }, UNDO_WINDOW_MS);
+      }
     },
-    [commitDelete, dismissToast, pushToast, undoDelete]
+    [commitPendingDeletes, pushToast, undoPendingDeletes, updateToast]
   );
 
   const handleToggleFavorite = useCallback(
@@ -302,11 +436,12 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
     [pushToast]
   );
 
+  // 成功路径刻意不弹 toast：卡片上的按钮已经有"已复制 + 一圈脉冲"的局部反馈，
+  // 再补一个屏幕底部的全局提示只会让人跳视线。失败仍然要弹 —— 它没有别的地方可显示。
   const handleCopy = useCallback(
     async (content: string) => {
       try {
         await navigator.clipboard.writeText(content);
-        pushToast("已复制到剪贴板");
       } catch {
         pushToast("复制失败", "error");
       }
@@ -361,7 +496,11 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
 
         <div className="scrollbar-thin flex-1 overflow-y-auto px-4 pb-8 sm:px-8">
           {filteredPrompts.length === 0 ? (
-            <EmptyState onNew={openNewModal} hasPrompts={prompts.length > 0} />
+            <EmptyState
+              onNew={openNewModal}
+              hasPrompts={prompts.length > 0}
+              reliefOptions={reliefOptions}
+            />
           ) : (
             <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
               {filteredPrompts.map((prompt, idx) => (
@@ -409,24 +548,50 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
 function EmptyState({
   onNew,
   hasPrompts,
+  reliefOptions,
 }: {
   onNew: () => void;
   hasPrompts: boolean;
+  reliefOptions: ReliefOption[];
 }) {
   return (
     <div className="flex h-full flex-col items-center justify-center px-4 text-center">
       <div className="relative mb-6 flex h-20 w-20 items-center justify-center rounded-2xl border border-border-subtle bg-bg-surface shadow-md">
         <span className="font-display text-4xl italic text-text-muted">P</span>
-        <div className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-accent shadow-[0_0_10px_#ff6b35]" />
+        <div className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-accent shadow-[0_0_10px_var(--accent-glow)]" />
       </div>
       <p className="mb-1 font-display text-xl font-medium tracking-wide text-text-primary">
         {hasPrompts ? "没有匹配的档案" : "档案库为空"}
       </p>
-      <p className="mb-8 max-w-xs text-sm leading-relaxed text-text-muted">
-        {hasPrompts
-          ? "尝试切换分类或调整搜索词"
-          : "新建你的第一条提示词，或直接复制剪贴板内容"}
-      </p>
+
+      {hasPrompts ? (
+        reliefOptions.length > 0 ? (
+          <div className="mb-8 flex flex-col items-center gap-2">
+            {reliefOptions.map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                onClick={option.apply}
+                className="btn rounded-lg border border-border-subtle bg-bg-surface px-4 py-2 text-sm text-text-secondary transition hover:border-border-hover hover:text-text-primary"
+              >
+                {option.label}
+                <span className="ml-1 tabular-nums text-text-muted">
+                  · {option.count} 条
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="mb-8 max-w-xs text-sm leading-relaxed text-text-muted">
+            尝试切换分类或调整搜索词
+          </p>
+        )
+      ) : (
+        <p className="mb-8 max-w-xs text-sm leading-relaxed text-text-muted">
+          新建你的第一条提示词，或直接复制剪贴板内容
+        </p>
+      )}
+
       <button
         type="button"
         onClick={onNew}

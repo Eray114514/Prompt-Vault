@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { Prompt } from "@/lib/types";
 import { CATEGORY_LABELS, categoryColor } from "@/lib/types";
 import { CopyIcon, CheckIcon, PencilIcon, TrashIcon, StarIcon } from "./Icons";
@@ -26,11 +26,24 @@ export function PromptCard({
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [notesExpanded, setNotesExpanded] = useState(false);
+  /** 每次复制自增，用作闪光层的 key —— 新 key 必然重挂载，动画就一定会从头播。 */
+  const [flashNonce, setFlashNonce] = useState(0);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+    };
+  }, []);
+
+  // 复制成功的反馈落在按钮自身（一圈脉冲），而不是屏幕底部的 toast ——
+  // 眼睛本来就在卡片上，没必要跳一次视线。底部 toast 留给创建/更新/删除这类结果。
   const handleCopy = () => {
     onCopy(prompt.content);
     setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    setFlashNonce((n) => n + 1);
+    if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+    copiedTimerRef.current = setTimeout(() => setCopied(false), 1500);
   };
 
   const PREVIEW_LEN = 180;
@@ -205,7 +218,7 @@ export function PromptCard({
             type="button"
             onClick={handleCopy}
             aria-label="复制提示词内容"
-            className={`btn rounded-md px-2.5 py-1.5 text-xs ${
+            className={`btn relative rounded-md px-2.5 py-1.5 text-xs ${
               copied
                 ? "bg-fav-soft text-fav"
                 : "bg-bg-hover text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
@@ -213,6 +226,13 @@ export function PromptCard({
           >
             {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
             {copied ? "已复制" : "复制"}
+            {flashNonce > 0 && (
+              <span
+                key={flashNonce}
+                aria-hidden="true"
+                className="flash-copy pointer-events-none absolute inset-0 rounded-md"
+              />
+            )}
           </button>
           <button
             type="button"

@@ -24,6 +24,32 @@ function looksLikePrompt(text: string): boolean {
 /** 两次剪贴板读取之间的最小间隔，避免每次窗口聚焦都去敲权限。 */
 const RECHECK_THROTTLE_MS = 8000;
 
+/**
+ * 连续忽略多少次后，本次会话就彻底安静。
+ * 1-2 次可能只是"这次不想要"；连着 3 次说明它成了持续干扰。
+ */
+const DISMISS_LIMIT = 3;
+const DISMISS_COUNT_KEY = "pv_clipboard_dismiss_count";
+
+function readDismissCount(): number {
+  try {
+    const raw = window.sessionStorage.getItem(DISMISS_COUNT_KEY);
+    const parsed = Number.parseInt(raw ?? "0", 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  } catch {
+    // Safari 隐私模式等会直接抛 —— 交由内存 ref 兜底
+    return 0;
+  }
+}
+
+function persistDismissCount(value: number): void {
+  try {
+    window.sessionStorage.setItem(DISMISS_COUNT_KEY, String(value));
+  } catch {
+    // 同上：持久化失败不影响本次运行
+  }
+}
+
 export function ClipboardDetector({
   onDetect,
   existingPrompts,
@@ -36,6 +62,10 @@ export function ClipboardDetector({
   const lastCheckRef = useRef(0);
   const unsupportedRef = useRef(false);
 
+  // 存 sessionStorage 而不是纯 ref：本组件会随 router.refresh() 重挂载，
+  // ref 会丢，计数也就白攒了。标签页关闭即清零，正好等于"本次会话"。
+  const dismissCountRef = useRef<number | null>(null);
+
   const existingContents = useMemo(
     () => new Set(existingPrompts.map((p) => p.content.trim())),
     [existingPrompts]
@@ -45,8 +75,16 @@ export function ClipboardDetector({
     existingContentsRef.current = existingContents;
   }, [existingContents]);
 
+  const getDismissCount = useCallback((): number => {
+    if (dismissCountRef.current === null) {
+      dismissCountRef.current = readDismissCount();
+    }
+    return dismissCountRef.current;
+  }, []);
+
   const checkClipboard = useCallback(async () => {
     if (unsupportedRef.current) return;
+    if (getDismissCount() >= DISMISS_LIMIT) return;
     if (typeof navigator === "undefined" || !navigator.clipboard?.readText) {
       // 浏览器没实现（部分非 Chrome 内核）就彻底安静，不要反复打扰
       unsupportedRef.current = true;
@@ -68,7 +106,7 @@ export function ClipboardDetector({
     } catch {
       // NotAllowedError 属于常态（页面未聚焦、用户未授权），静默即可
     }
-  }, []);
+  }, [getDismissCount]);
 
   useEffect(() => {
     // 旧实现只在挂载时查一次，之后复制的东西永远发现不了。
@@ -91,11 +129,15 @@ export function ClipboardDetector({
   }, [checkClipboard]);
 
   const dismiss = useCallback(() => {
+    const next = getDismissCount() + 1;
+    dismissCountRef.current = next;
+    persistDismissCount(next);
+
     setDetected((current) => {
       if (current) dismissedRef.current.add(current);
       return null;
     });
-  }, []);
+  }, [getDismissCount]);
 
   if (!detected) return null;
 
