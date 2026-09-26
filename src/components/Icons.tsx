@@ -231,7 +231,6 @@ const ICON_MAP: Record<string, React.FC<IconProps>> = {
   edit: EditIcon,
   video: VideoIcon,
   chat: ChatIcon,
-  code: CodeIcon,
 };
 
 export function NavIcon({

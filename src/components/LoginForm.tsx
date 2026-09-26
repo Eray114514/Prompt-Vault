@@ -56,13 +56,7 @@ export function LoginForm({ serverConfigured }: LoginFormProps) {
           className="glass-strong animate-scale-in overflow-hidden rounded-2xl"
           aria-labelledby="login-heading"
         >
-          <div
-            className="h-1 w-full"
-            style={{
-              background:
-                "linear-gradient(90deg, var(--cat-image-gen), var(--cat-image-edit), var(--cat-video), var(--cat-llm))",
-            }}
-          />
+          <div className="h-1 w-full bg-accent/25" aria-hidden="true" />
 
           <div className="space-y-5 p-6">
             <div className="flex items-center gap-2 text-text-secondary">
@@ -122,7 +116,7 @@ export function LoginForm({ serverConfigured }: LoginFormProps) {
             <button
               type="submit"
               disabled={pending || !password || !serverConfigured}
-              className="btn h-11 w-full rounded-lg bg-accent text-white shadow-[0_0_16px_rgba(255,107,53,0.25)] transition hover:bg-accent-hover hover:shadow-[0_0_24px_rgba(255,107,53,0.4)] disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
+              className="btn glow-accent h-11 w-full rounded-lg bg-accent text-white transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
               {pending ? "验证中..." : "进入档案库"}
             </button>

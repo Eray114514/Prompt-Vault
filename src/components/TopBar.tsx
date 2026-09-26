@@ -53,7 +53,7 @@ export function TopBar({
         <button
           type="button"
           onClick={onNew}
-          className="btn h-10 rounded-lg bg-accent px-3 text-white shadow-[0_0_16px_rgba(255,107,53,0.25)] hover:-translate-y-0.5 hover:bg-accent-hover hover:shadow-[0_0_24px_rgba(255,107,53,0.4)] sm:px-5"
+          className="btn glow-accent h-10 rounded-lg bg-accent px-3 text-white hover:-translate-y-0.5 hover:bg-accent-hover sm:px-5"
         >
           <PlusIcon size={16} />
           <span className="hidden sm:inline">新建提示词</span>

@@ -117,7 +117,7 @@ export function Sidebar({
                     : "text-text-secondary hover:bg-bg-hover hover:text-text-primary"
                 }`}
               >
-                {/* 左侧霓虹指示条 */}
+                {/* 左侧分类指示条：正确的用法（小面积 + 仅激活态），只把半径收一点 */}
                 {catColor && (
                   <span
                     aria-hidden="true"
@@ -125,20 +125,20 @@ export function Sidebar({
                     style={{
                       backgroundColor: catColor,
                       opacity: active ? 1 : 0,
-                      boxShadow: active ? `0 0 10px ${catColor}` : "none",
+                      boxShadow: active ? `0 0 6px ${catColor}` : "none",
                     }}
                   />
                 )}
                 {item.value === "favorites" && active && (
                   <span
                     aria-hidden="true"
-                    className="absolute left-0 top-1/2 h-6 w-0.5 -translate-y-1/2 rounded-full bg-fav shadow-[0_0_10px_#ffd600]"
+                    className="absolute left-0 top-1/2 h-6 w-0.5 -translate-y-1/2 rounded-full bg-fav shadow-[0_0_6px_var(--fav)]"
                   />
                 )}
                 {item.value === "all" && active && (
                   <span
                     aria-hidden="true"
-                    className="absolute left-0 top-1/2 h-6 w-0.5 -translate-y-1/2 rounded-full bg-white shadow-[0_0_10px_rgba(255,255,255,0.5)]"
+                    className="absolute left-0 top-1/2 h-6 w-0.5 -translate-y-1/2 rounded-full bg-white shadow-[0_0_6px_rgba(255,255,255,0.4)]"
                   />
                 )}
 

@@ -24,16 +24,19 @@
 
   --accent: #ff6b35;
   --accent-hover: #ff8557;
-  --accent-glow: rgba(255, 107, 53, 0.35);
+  /* 主按钮光晕。收敛前是 0.35 / 收敛前 hover 用 0.4 的任意值 —— 改这两个数即可回退。 */
+  --accent-glow-soft: rgba(255, 107, 53, 0.18);
+  --accent-glow: rgba(255, 107, 53, 0.28);
   --accent-soft: rgba(255, 107, 53, 0.1);
 
-  --cat-image-gen: #ff6b35;
-  --cat-image-edit: #00d9ff;
-  --cat-video: #ff006e;
-  --cat-llm: #caff00;
+  /* 全屏背景光晕。收敛前三色分别是 0.09 / 0.05 / 0.06。 */
+  --glow-1: rgba(255, 107, 53, 0.05);
+  --glow-2: rgba(0, 217, 255, 0.03);
+  --glow-3: rgba(255, 0, 110, 0.03);
 
   --fav: #ffd600;
   --fav-soft: rgba(255, 214, 0, 0.12);
+  --fav-glow: rgba(255, 214, 0, 0.5);
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.5);
@@ -114,9 +117,9 @@ body {
   pointer-events: none;
   z-index: 0;
   background:
-    radial-gradient(circle at 10% 10%, rgba(255, 107, 53, 0.09), transparent 40%),
-    radial-gradient(circle at 90% 30%, rgba(0, 217, 255, 0.05), transparent 35%),
-    radial-gradient(circle at 70% 90%, rgba(255, 0, 110, 0.06), transparent 45%),
+    radial-gradient(circle at 10% 10%, var(--glow-1), transparent 40%),
+    radial-gradient(circle at 90% 30%, var(--glow-2), transparent 35%),
+    radial-gradient(circle at 70% 90%, var(--glow-3), transparent 45%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.015) 0%, transparent 1px);
   background-size: 100% 100%, 100% 100%, 100% 100%, 100% 32px;
 }
@@ -134,11 +137,6 @@ body {
   backdrop-filter: blur(32px) saturate(150%);
   -webkit-backdrop-filter: blur(32px) saturate(150%);
   border: 1px solid var(--border-default);
-}
-
-/* 霓虹边框 */
-.neon-border {
-  box-shadow: inset 0 0 0 1px var(--border-default), 0 0 0 1px rgba(0, 0, 0, 0.5);
 }
 
 /* 输入框聚焦态。
@@ -169,6 +167,16 @@ a:focus-visible,
 /* 按钮基础 */
 .btn {
   @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-all duration-200;
+}
+
+/* 主按钮光晕。
+   六处（顶栏新建 / 空状态 / 弹窗保存 / 登录 / 错误页重试 / 剪贴板添加）本来各写一遍
+   同样的任意值 box-shadow，收敛成这一个类。数值在 :root 的 --accent-glow* 里。 */
+.glow-accent:not(:disabled) {
+  box-shadow: 0 0 14px var(--accent-glow-soft);
+}
+.glow-accent:not(:disabled):hover {
+  box-shadow: 0 0 20px var(--accent-glow);
 }
 
 /* 复制闪光 */

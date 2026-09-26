@@ -129,9 +129,13 @@ If you add a route, it inherits (2) from `next.config.mjs`. Don't remove these.
 
 All colors, shadows, and fonts are CSS custom properties in `globals.css`. Tailwind config extends with `bg-*`, `border-*`, `text-*`, `accent-*`, `cat-*`, `fav-*` tokens that reference these variables. When adding UI, use the Tailwind token names (e.g. `bg-bg-surface`, `text-text-secondary`) — don't hardcode hex values or use arbitrary values.
 
-Category neon accent colors are defined in both `globals.css` (CSS vars) and `types.ts` (`CATEGORY_COLORS`). Keep them in sync.
+Category neon accent colors live **only** in `CATEGORY_COLORS` (`src/lib/types.ts`). The old `--cat-*` CSS vars and the `cat.*` Tailwind mapping were removed — don't reintroduce a second source of truth.
+
+**Neon carries information, not decoration.** Category color belongs only where it identifies something: the card top bar, the category badge, the sidebar indicator, the modal's top strip (which shows the category being edited). Don't add glows to containers, and don't add full-bleed multi-color gradients. Button glows go through the shared `.glow-accent` class; tune them via `--accent-glow-soft` / `--accent-glow` in `globals.css`, never with inline arbitrary values.
 
 `--text-muted` is tuned to clear WCAG AA (≈4.9:1 on the base background). Don't darken it without rechecking contrast.
+
+Animations defined in **both** `globals.css` and `tailwind.config.ts` under the same name will silently override each other. `card-enter` and `flash-copy` live only in `globals.css` — keep it that way.
 
 ## Accessibility & layout expectations
 

@@ -430,7 +430,7 @@ function EmptyState({
       <button
         type="button"
         onClick={onNew}
-        className="btn h-11 rounded-lg bg-accent px-6 text-white shadow-[0_0_16px_rgba(255,107,53,0.25)] hover:-translate-y-0.5 hover:bg-accent-hover hover:shadow-[0_0_24px_rgba(255,107,53,0.4)]"
+        className="btn glow-accent h-11 rounded-lg bg-accent px-6 text-white hover:-translate-y-0.5 hover:bg-accent-hover"
       >
         新建提示词
       </button>

@@ -2,7 +2,7 @@
 
 import { unstable_noStore as noStore } from "next/cache";
 import { supabase } from "./supabase";
-import { parseNewPrompt, sortByCreatedDesc } from "./prompts";
+import { parseNewPrompt } from "./prompts";
 import { requireSession } from "./session";
 import type { ActionResult, NewPrompt, Prompt } from "./types";
 
@@ -97,6 +97,3 @@ export async function toggleFavorite(
 }
 
 /** 客户端在乐观更新后用来把本地顺序校准回服务端顺序。 */
-export async function listPromptsSorted(): Promise<Prompt[]> {
-  return sortByCreatedDesc(await getPrompts());
-}

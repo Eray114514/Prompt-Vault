@@ -44,7 +44,7 @@ export default function GlobalError({
           <button
             type="button"
             onClick={unauthorized ? () => window.location.assign("/login") : reset}
-            className="btn h-10 rounded-lg bg-accent px-6 text-white shadow-[0_0_16px_rgba(255,107,53,0.25)] hover:bg-accent-hover"
+            className="btn glow-accent h-10 rounded-lg bg-accent px-6 text-white hover:bg-accent-hover"
           >
             {unauthorized ? "去登录" : "重试"}
           </button>

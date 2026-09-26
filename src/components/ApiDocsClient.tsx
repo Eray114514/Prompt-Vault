@@ -336,11 +336,9 @@ ${categoryList}
                     className="flex items-center gap-3 rounded-lg border border-border-subtle bg-bg-surface/50 px-4 py-3"
                   >
                     <span
+                      aria-hidden="true"
                       className="h-2 w-2 rounded-full"
-                      style={{
-                        backgroundColor: color,
-                        boxShadow: `0 0 8px ${color}`,
-                      }}
+                      style={{ backgroundColor: color }}
                     />
                     <code className="font-mono text-xs text-text-primary">
                       {cat.value}

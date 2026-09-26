@@ -141,13 +141,10 @@ export function PromptModal({
         className="glass-strong animate-scale-in flex max-h-[92dvh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* 顶部霓虹条 */}
+        {/* 顶条现在承载"正在编辑哪个分类"这一信息，不再是装饰性的四色渐变 */}
         <div
-          className="h-1 w-full shrink-0"
-          style={{
-            background: `linear-gradient(90deg, ${CATEGORY_COLORS.image_generation}, ${CATEGORY_COLORS.image_editing}, ${CATEGORY_COLORS.video_generation}, ${CATEGORY_COLORS.llm_chat})`,
-            boxShadow: "0 0 20px rgba(255,107,53,0.4)",
-          }}
+          className="h-1 w-full shrink-0 transition-colors duration-200"
+          style={{ backgroundColor: CATEGORY_COLORS[category] }}
         />
 
         <div className="flex shrink-0 items-center justify-between border-b border-border-subtle/60 px-5 py-4">
@@ -212,11 +209,7 @@ export function PromptModal({
                       }`}
                       style={
                         active
-                          ? {
-                              backgroundColor: color,
-                              borderColor: color,
-                              boxShadow: `0 0 14px ${color}55`,
-                            }
+                          ? { backgroundColor: color, borderColor: color }
                           : { borderColor: `${color}30` }
                       }
                     >
@@ -323,7 +316,7 @@ export function PromptModal({
               <button
                 type="submit"
                 disabled={submitting || !title.trim() || !content.trim()}
-                className="btn h-10 rounded-lg bg-accent px-6 text-white shadow-[0_0_16px_rgba(255,107,53,0.25)] transition hover:bg-accent-hover hover:shadow-[0_0_24px_rgba(255,107,53,0.4)] disabled:cursor-not-allowed disabled:opacity-50"
+                className="btn glow-accent h-10 rounded-lg bg-accent px-6 text-white transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {submitting ? "保存中..." : prompt ? "保存" : "添加"}
               </button>

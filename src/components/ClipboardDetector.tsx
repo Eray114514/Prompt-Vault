@@ -104,12 +104,7 @@ export function ClipboardDetector({
   return (
     <div className="animate-slide-in-right fixed bottom-6 right-4 z-40 w-[min(20rem,calc(100vw-2rem))] sm:bottom-8 sm:right-8">
       <div className="glass-strong overflow-hidden rounded-2xl shadow-2xl">
-        <div
-          className="h-1 w-full"
-          style={{
-            background: "linear-gradient(90deg, #ff6b35, #00d9ff, #ff006e, #caff00)",
-          }}
-        />
+        <div className="h-1 w-full bg-accent/25" aria-hidden="true" />
         <div className="p-4">
           <div className="mb-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -140,7 +135,7 @@ export function ClipboardDetector({
                 dismissedRef.current.add(detected);
                 setDetected(null);
               }}
-              className="btn flex-1 rounded-lg bg-accent py-2 text-xs font-medium text-white shadow-[0_0_14px_rgba(255,107,53,0.3)] hover:bg-accent-hover hover:shadow-[0_0_20px_rgba(255,107,53,0.45)]"
+              className="btn glow-accent flex-1 rounded-lg bg-accent py-2 text-xs font-medium text-white hover:bg-accent-hover"
             >
               添加为提示词
             </button>

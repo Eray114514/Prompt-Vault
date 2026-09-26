@@ -32,25 +32,22 @@ const config: Config = {
           DEFAULT: "var(--fav)",
           soft: "var(--fav-soft)",
         },
-        cat: {
-          image: "var(--cat-image-gen)",
-          edit: "var(--cat-image-edit)",
-          video: "var(--cat-video)",
-          llm: "var(--cat-llm)",
-        },
+        // 原 cat.* 映射已移除：它映射的 --cat-* 变量此前只被登录页一处渐变消费，
+        // 那处已删，分类色的唯一事实来源现在是 types.ts 的 CATEGORY_COLORS。
       },
       fontFamily: {
         display: ["var(--font-bodoni)", "Georgia", "serif"],
         body: ["var(--font-work)", "system-ui", "sans-serif"],
         mono: ["var(--font-mono)", "ui-monospace", "monospace"],
       },
+      // 这里只保留真正被 className 使用的动画。
+      // card-enter 与 flash 的 keyframes 曾在 globals.css 里各有一份重复定义，
+      // 同名的 @keyframes 会互相覆盖、行为不可控 —— 已删掉这边的重复份。
       animation: {
         "fade-in": "fadeIn 0.25s ease-out",
         "slide-up": "slideUp 0.4s cubic-bezier(0.22, 1, 0.36, 1)",
         "scale-in": "scaleIn 0.2s cubic-bezier(0.22, 1, 0.36, 1)",
         "slide-in-right": "slideInRight 0.35s cubic-bezier(0.22, 1, 0.36, 1)",
-        "card-enter": "cardEnter 0.45s cubic-bezier(0.22, 1, 0.36, 1) both",
-        "flash": "flashCopy 0.5s ease-out",
       },
       keyframes: {
         fadeIn: {
@@ -69,20 +66,12 @@ const config: Config = {
           "0%": { opacity: "0", transform: "translateX(24px)" },
           "100%": { opacity: "1", transform: "translateX(0)" },
         },
-        cardEnter: {
-          "0%": { opacity: "0", transform: "translateY(16px) scale(0.98)" },
-          "100%": { opacity: "1", transform: "translateY(0) scale(1)" },
-        },
-        flashCopy: {
-          "0%": { boxShadow: "0 0 0 0 rgba(255, 214, 0, 0.5)" },
-          "100%": { boxShadow: "0 0 0 12px rgba(255, 214, 0, 0)" },
-        },
       },
       boxShadow: {
         sm: "var(--shadow-sm)",
         md: "var(--shadow-md)",
         lg: "var(--shadow-lg)",
-        glow: "0 0 24px var(--accent-glow)",
+        glow: "0 0 20px var(--accent-glow)",
       },
     },
   },

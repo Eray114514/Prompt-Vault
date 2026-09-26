@@ -64,13 +64,11 @@ export function PromptCard({
         boxShadow: "0 2px 0 0 rgba(255,255,255,0.02) inset",
       }}
     >
-      {/* 顶部霓虹条 */}
+      {/* 顶条：色彩承载分类信息，不再叠发光 */}
       <div
-        className="absolute left-5 right-5 top-0 h-0.5 rounded-b-full opacity-60 transition-opacity group-hover:opacity-100"
-        style={{
-          backgroundColor: catColor,
-          boxShadow: `0 0 12px ${catColor}, 0 0 4px ${catColor}`,
-        }}
+        aria-hidden="true"
+        className="absolute left-5 right-5 top-0 h-0.5 rounded-b-full opacity-80 transition-opacity group-hover:opacity-100"
+        style={{ backgroundColor: catColor }}
       />
 
       {/* 标题栏 */}
@@ -92,9 +90,7 @@ export function PromptCard({
           <StarIcon
             size={17}
             filled={prompt.is_favorite}
-            className={
-              prompt.is_favorite ? "drop-shadow-[0_0_6px_rgba(255,214,0,0.6)]" : ""
-            }
+            className={prompt.is_favorite ? "drop-shadow-[0_0_5px_var(--fav-glow)]" : ""}
           />
         </button>
       </div>
