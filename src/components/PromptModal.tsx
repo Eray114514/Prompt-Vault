@@ -1,17 +1,20 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import type { Prompt, NewPrompt, Category } from "@/lib/types";
 import { CATEGORIES, CATEGORY_COLORS, PROMPT_LIMITS } from "@/lib/types";
 import { CloseIcon } from "./Icons";
 import { useFocusTrap } from "./useFocusTrap";
 
 const DEFAULT_CATEGORY: Category = "image_generation";
+const MAX_SUGGESTIONS = 8;
 
 interface PromptModalProps {
   prompt: Prompt | null;
   defaultCategory?: Category;
   prefillContent?: string;
+  /** 全量标签（父级聚合后传入）。弹窗只拿得到单条 prompt，自己算不出候选。 */
+  tagSuggestions?: string[];
   onSubmit: (data: NewPrompt) => Promise<void>;
   onClose: () => void;
 }
@@ -20,6 +23,7 @@ export function PromptModal({
   prompt,
   defaultCategory,
   prefillContent,
+  tagSuggestions = [],
   onSubmit,
   onClose,
 }: PromptModalProps) {
@@ -30,8 +34,14 @@ export function PromptModal({
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const [highlight, setHighlight] = useState(-1);
+
   const tagInputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  // 用一个 ref 镜像下拉开关状态：全局 Escape 监听是原生监听，
+  // 读 state 会读到本次事件之前的旧值。
+  const suggestOpenRef = useRef(false);
 
   useFocusTrap(dialogRef, true);
 
@@ -56,15 +66,37 @@ export function PromptModal({
       setTags([]);
     }
     setTagInput("");
+    setSuggestOpen(false);
+    setHighlight(-1);
   }, [prompt, prefillContent, defaultCategory]);
 
   useEffect(() => {
+    suggestOpenRef.current = suggestOpen;
+  }, [suggestOpen]);
+
+  useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      // 补全下拉打开时，Esc 只该关下拉，不能顺手把整个弹窗也关掉
+      if (suggestOpenRef.current) return;
+      onClose();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
+
+  const suggestions = useMemo(() => {
+    const query = tagInput.trim().toLowerCase();
+    if (!query) return [];
+    const pool = tagSuggestions.filter((tag) => !tags.includes(tag));
+    const startsWith = pool.filter((tag) => tag.toLowerCase().startsWith(query));
+    const contains = pool.filter(
+      (tag) =>
+        !tag.toLowerCase().startsWith(query) && tag.toLowerCase().includes(query)
+    );
+    // 前缀命中优先于子串命中
+    return [...startsWith, ...contains].slice(0, MAX_SUGGESTIONS);
+  }, [tagInput, tagSuggestions, tags]);
 
   const addTag = (raw: string) => {
     const value = raw.trim();
@@ -81,10 +113,49 @@ export function PromptModal({
     setTags((prev) => prev.filter((_, i) => i !== idx));
   };
 
+  const closeSuggestions = () => {
+    setSuggestOpen(false);
+    setHighlight(-1);
+  };
+
+  const acceptSuggestion = (suggestion: string) => {
+    addTag(suggestion);
+    closeSuggestions();
+  };
+
   const handleTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const listOpen = suggestOpen && suggestions.length > 0;
+
+    if (listOpen) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setHighlight((h) => (h + 1) % suggestions.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setHighlight((h) => (h <= 0 ? suggestions.length - 1 : h - 1));
+        return;
+      }
+      if (e.key === "Escape") {
+        // 只关下拉。stopPropagation 是双保险：即使全局监听先跑了，
+        // suggestOpenRef 也还停在 true，弹窗不会被误关。
+        e.preventDefault();
+        e.stopPropagation();
+        closeSuggestions();
+        return;
+      }
+      if (e.key === "Enter" && highlight >= 0) {
+        e.preventDefault();
+        acceptSuggestion(suggestions[highlight]);
+        return;
+      }
+    }
+
     if (e.key === "Enter" || e.key === ",") {
       e.preventDefault();
       addTag(tagInput);
+      closeSuggestions();
     } else if (e.key === "Backspace" && tagInput === "" && tags.length > 0) {
       setTags((prev) => prev.slice(0, -1));
     }
@@ -92,6 +163,7 @@ export function PromptModal({
 
   const handleTagBlur = () => {
     addTag(tagInput);
+    closeSuggestions();
   };
 
   const handlePaste = (e: React.ClipboardEvent) => {
@@ -109,6 +181,7 @@ export function PromptModal({
           .map((tag) => tag.slice(0, PROMPT_LIMITS.tagLength))
       );
     }
+    closeSuggestions();
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -227,40 +300,87 @@ export function PromptModal({
               >
                 标签
               </label>
-              <div
-                className="flex min-h-[42px] flex-wrap items-center gap-2 rounded-lg border border-border-subtle bg-bg-input px-2.5 py-1.5 transition focus-within:border-accent focus-within:shadow-[0_0_0_3px_var(--accent-soft)]"
-                onClick={() => tagInputRef.current?.focus()}
-              >
-                {tags.map((tag, idx) => (
-                  <span
-                    key={`${tag}-${idx}`}
-                    className="flex items-center gap-1 rounded-md bg-bg-elevated px-2 py-1 text-xs text-text-primary"
-                  >
-                    {tag}
-                    <button
-                      type="button"
-                      onClick={() => removeTag(idx)}
-                      className="rounded text-text-muted hover:text-white"
-                      aria-label={`删除标签 ${tag}`}
+              <div className="relative">
+                <div
+                  className="flex min-h-[42px] flex-wrap items-center gap-2 rounded-lg border border-border-subtle bg-bg-input px-2.5 py-1.5 transition focus-within:border-accent focus-within:shadow-[0_0_0_3px_var(--accent-soft)]"
+                  onClick={() => tagInputRef.current?.focus()}
+                >
+                  {tags.map((tag, idx) => (
+                    <span
+                      key={`${tag}-${idx}`}
+                      className="flex items-center gap-1 rounded-md bg-bg-elevated px-2 py-1 text-xs text-text-primary"
                     >
-                      ×
-                    </button>
-                  </span>
-                ))}
-                <input
-                  id="prompt-tags"
-                  ref={tagInputRef}
-                  type="text"
-                  value={tagInput}
-                  onChange={(e) => setTagInput(e.target.value)}
-                  onKeyDown={handleTagKeyDown}
-                  onBlur={handleTagBlur}
-                  onPaste={handlePaste}
-                  placeholder={tags.length === 0 ? "输入后回车添加" : ""}
-                  maxLength={PROMPT_LIMITS.tagLength}
-                  aria-describedby="prompt-tags-hint"
-                  className="min-w-[80px] flex-1 bg-transparent py-1 text-sm text-text-primary placeholder-text-muted outline-none"
-                />
+                      {tag}
+                      <button
+                        type="button"
+                        onClick={() => removeTag(idx)}
+                        className="rounded text-text-muted hover:text-white"
+                        aria-label={`删除标签 ${tag}`}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                  <input
+                    id="prompt-tags"
+                    ref={tagInputRef}
+                    type="text"
+                    value={tagInput}
+                    onChange={(e) => {
+                      setTagInput(e.target.value);
+                      setSuggestOpen(true);
+                      setHighlight(-1);
+                    }}
+                    onFocus={() => setSuggestOpen(true)}
+                    onKeyDown={handleTagKeyDown}
+                    onBlur={handleTagBlur}
+                    onPaste={handlePaste}
+                    placeholder={tags.length === 0 ? "输入后回车添加" : ""}
+                    maxLength={PROMPT_LIMITS.tagLength}
+                    autoComplete="off"
+                    role="combobox"
+                    aria-autocomplete="list"
+                    aria-expanded={suggestOpen && suggestions.length > 0}
+                    aria-controls="prompt-tags-listbox"
+                    aria-activedescendant={
+                      highlight >= 0 ? `prompt-tag-option-${highlight}` : undefined
+                    }
+                    aria-describedby="prompt-tags-hint"
+                    className="min-w-[80px] flex-1 bg-transparent py-1 text-sm text-text-primary placeholder-text-muted outline-none"
+                  />
+                </div>
+
+                {suggestOpen && suggestions.length > 0 && (
+                  <ul
+                    id="prompt-tags-listbox"
+                    role="listbox"
+                    aria-label="标签建议"
+                    className="scrollbar-thin absolute left-0 right-0 top-full z-20 mt-1 max-h-48 overflow-y-auto rounded-lg border border-border-subtle bg-bg-elevated py-1 shadow-lg"
+                  >
+                    {suggestions.map((suggestion, index) => (
+                      <li
+                        key={suggestion}
+                        id={`prompt-tag-option-${index}`}
+                        role="option"
+                        aria-selected={index === highlight}
+                        // onMouseDown + preventDefault 防止输入框先失焦 ——
+                        // 否则 blur 里的 addTag 会抢在点击之前把半截输入提交掉
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          acceptSuggestion(suggestion);
+                        }}
+                        onMouseEnter={() => setHighlight(index)}
+                        className={`cursor-pointer truncate px-3 py-1.5 text-xs transition ${
+                          index === highlight
+                            ? "bg-bg-hover text-text-primary"
+                            : "text-text-secondary"
+                        }`}
+                      >
+                        {suggestion}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
               <p id="prompt-tags-hint" className="mt-1.5 text-[11px] text-text-muted">
                 按 Enter 添加，支持粘贴逗号/换行分隔的多标签（最多 {PROMPT_LIMITS.tagCount} 个）

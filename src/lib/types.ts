@@ -37,6 +37,9 @@ export const PROMPT_LIMITS = {
 /** 单次 GET 请求最多返回的收藏条目数，防止收藏区无限膨胀拖垮响应。 */
 export const MAX_FAVORITES_RETURNED = 200;
 
+/** 单次请求最多接受多少个 tag 过滤条件（多选之间是 AND）。 */
+export const MAX_TAG_FILTER = 8;
+
 /**
  * Server Action 的返回值约定。
  *

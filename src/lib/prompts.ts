@@ -110,3 +110,43 @@ export function sortByCreatedDesc(list: Prompt[]): Prompt[] {
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   );
 }
+
+export interface TagCount {
+  tag: string;
+  count: number;
+}
+
+/**
+ * 从全量提示词聚合标签及出现次数。
+ *
+ * 计数降序；同计数用 zh 语音环境比较做兜底 —— 否则标签顺序会随插入顺序抖动，
+ * 侧栏看起来像在乱跳。计数口径始终是全量，与分类计数一致（侧栏是稳定的导航面，
+ * 让它随筛选变化会让人困惑）。
+ */
+export function aggregateTags(prompts: Prompt[]): TagCount[] {
+  const counts = new Map<string, number>();
+
+  for (const prompt of prompts) {
+    for (const raw of prompt.tags) {
+      const tag = raw.trim();
+      if (!tag) continue;
+      counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    }
+  }
+
+  return Array.from(counts, ([tag, count]) => ({ tag, count })).sort(
+    (a, b) => b.count - a.count || a.tag.localeCompare(b.tag, "zh")
+  );
+}
+
+/**
+ * 标签筛选语义：多选之间是 AND —— 一条提示词必须**同时**含全部选中标签。
+ *
+ * 理由：单条提示词内的 tags 本来就是一个 AND 集合，加第二个标签的直觉是"收窄"；
+ * 想放宽用分类或搜索即可。这个语义也能直译为 PostgREST 的 tags=cs.{a,b}。
+ */
+export function matchesTags(prompt: Prompt, selectedTags: string[]): boolean {
+  if (selectedTags.length === 0) return true;
+  const owned = new Set(prompt.tags.map((tag) => tag.trim().toLowerCase()));
+  return selectedTags.every((tag) => owned.has(tag.trim().toLowerCase()));
+}

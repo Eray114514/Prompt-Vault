@@ -4,13 +4,22 @@ import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
 import { NAV_ITEMS, type FilterKey, type Category } from "@/lib/types";
 import { CATEGORY_COLORS } from "@/lib/types";
+import type { TagCount } from "@/lib/prompts";
 import { logoutAction } from "@/lib/auth-actions";
 import { NavIcon, CodeIcon, LogOutIcon, CloseIcon } from "./Icons";
+
+/** 侧栏标签区默认只露这么多个，避免标签一多就把导航挤没。 */
+const TAG_PREVIEW_LIMIT = 12;
 
 interface SidebarProps {
   filter: FilterKey;
   onFilterChange: (f: FilterKey) => void;
   counts: Record<string, number>;
+  /** 全量聚合出来的标签及计数，已按计数降序。 */
+  tagCounts: TagCount[];
+  selectedTags: string[];
+  onToggleTag: (tag: string) => void;
+  onClearTags: () => void;
   /** 移动端抽屉是否展开。lg 以上忽略此值，侧栏常驻。 */
   open: boolean;
   onClose: () => void;
@@ -39,12 +48,21 @@ export function Sidebar({
   filter,
   onFilterChange,
   counts,
+  tagCounts,
+  selectedTags,
+  onToggleTag,
+  onClearTags,
   open,
   onClose,
 }: SidebarProps) {
   const isDesktop = useIsDesktop();
   const [loggingOut, startLogout] = useTransition();
+  const [tagsExpanded, setTagsExpanded] = useState(false);
   const hiddenOnMobile = !isDesktop && !open;
+
+  const visibleTags = tagsExpanded
+    ? tagCounts
+    : tagCounts.slice(0, TAG_PREVIEW_LIMIT);
 
   const handleLogout = () => {
     startLogout(async () => {
@@ -64,7 +82,7 @@ export function Sidebar({
       )}
 
       <aside
-        aria-label="分类导航"
+        aria-label="筛选与导航"
         {...(hiddenOnMobile ? { inert: "" as unknown as boolean } : {})}
         className={`glass fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r border-border-subtle/60 transition-transform duration-300 ease-out lg:static lg:z-auto lg:w-60 lg:translate-x-0 ${
           open ? "translate-x-0" : "-translate-x-full"
@@ -93,8 +111,11 @@ export function Sidebar({
           </button>
         </div>
 
-        {/* 导航抽屉 */}
-        <nav className="scrollbar-thin flex-1 space-y-1 overflow-y-auto px-3 py-2">
+        {/* 导航 + 标签：同处一个滚动容器，侧栏整体一起滚 */}
+        <nav
+          aria-label="筛选导航"
+          className="scrollbar-thin flex-1 space-y-1 overflow-y-auto px-3 py-2"
+        >
           {NAV_ITEMS.map((item) => {
             const active = filter === item.value;
             const count = counts[item.value] ?? 0;
@@ -165,6 +186,57 @@ export function Sidebar({
               </button>
             );
           })}
+
+          {tagCounts.length > 0 && (
+            <section className="mt-4 border-t border-border-subtle/60 pt-3">
+              <div className="mb-2 flex items-center justify-between px-1">
+                <h2 className="text-[11px] tracking-wider text-text-muted">标签</h2>
+                {selectedTags.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={onClearTags}
+                    className="text-[11px] text-text-muted transition hover:text-text-primary"
+                  >
+                    清除
+                  </button>
+                )}
+              </div>
+
+              <div className="flex flex-wrap gap-1.5 px-1">
+                {visibleTags.map(({ tag, count }) => {
+                  const active = selectedTags.includes(tag);
+                  return (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => onToggleTag(tag)}
+                      aria-pressed={active}
+                      title={tag}
+                      className={`inline-flex max-w-full items-center gap-1 rounded-md px-2 py-0.5 text-[11px] transition ${
+                        active
+                          ? "bg-accent/20 text-text-primary"
+                          : "bg-bg-hover text-text-muted hover:text-text-secondary"
+                      }`}
+                    >
+                      <span className="truncate">{tag}</span>
+                      <span className="tabular-nums opacity-60">{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {tagCounts.length > TAG_PREVIEW_LIMIT && (
+                <button
+                  type="button"
+                  onClick={() => setTagsExpanded((prev) => !prev)}
+                  aria-expanded={tagsExpanded}
+                  className="mt-2 px-1 text-[11px] text-text-muted transition hover:text-text-secondary"
+                >
+                  {tagsExpanded ? "收起" : `显示全部 (${tagCounts.length})`}
+                </button>
+              )}
+            </section>
+          )}
         </nav>
 
         {/* 底部信息 */}

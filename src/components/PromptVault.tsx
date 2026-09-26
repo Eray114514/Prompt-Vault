@@ -10,7 +10,7 @@ import {
   deletePrompt,
   toggleFavorite,
 } from "@/lib/actions";
-import { sortByCreatedDesc } from "@/lib/prompts";
+import { aggregateTags, matchesTags, sortByCreatedDesc } from "@/lib/prompts";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { PromptCard } from "./PromptCard";
@@ -70,6 +70,9 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
   );
   const [filter, setFilter] = useState<FilterKey>("all");
   const [search, setSearch] = useState("");
+  // 标签是单选分类之外的正交、多选筛选轴，刻意不塞进 FilterKey ——
+  // 那是单值枚举，Sidebar 的 isCategory 与 Modal 的 defaultCategory 都依赖它保持单值语义。
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingPrompt, setEditingPrompt] = useState<Prompt | null>(null);
   const [prefillContent, setPrefillContent] = useState<string>("");
@@ -201,9 +204,12 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
   const filteredPrompts = useMemo(
     () =>
       prompts.filter(
-        (p) => matchesCategoryFilter(p, filter) && matchesSearch(p, search)
+        (p) =>
+          matchesCategoryFilter(p, filter) &&
+          matchesTags(p, selectedTags) &&
+          matchesSearch(p, search)
       ),
-    [prompts, filter, search]
+    [prompts, filter, selectedTags, search]
   );
 
   const counts = useMemo(() => {
@@ -219,6 +225,12 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
     return map;
   }, [prompts]);
 
+  const tagCounts = useMemo(() => aggregateTags(prompts), [prompts]);
+  const tagSuggestions = useMemo(
+    () => tagCounts.map((entry) => entry.tag),
+    [tagCounts]
+  );
+
   const filterLabel = useMemo(() => {
     if (filter === "all") return "全部";
     if (filter === "favorites") return "收藏";
@@ -227,10 +239,12 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
 
   /** 在给定的放宽条件下有多少命中。用于空结果时给可点的出口。 */
   const countMatching = useCallback(
-    (next: { search: string; filter: FilterKey }) =>
+    (next: { search: string; filter: FilterKey; tags: string[] }) =>
       prompts.filter(
         (p) =>
-          matchesCategoryFilter(p, next.filter) && matchesSearch(p, next.search)
+          matchesCategoryFilter(p, next.filter) &&
+          matchesTags(p, next.tags) &&
+          matchesSearch(p, next.search)
       ).length,
     [prompts]
   );
@@ -244,14 +258,31 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
 
     const hasSearch = search.trim().length > 0;
     const hasCategory = filter !== "all";
+    const hasTags = selectedTags.length > 0;
     const options: ReliefOption[] = [];
 
-    if (hasCategory && hasSearch) {
-      const count = countMatching({ search, filter: "all" });
+    if (hasTags) {
+      const count = countMatching({ search, filter, tags: [] });
+      if (count > 0) {
+        options.push({
+          key: "drop-tags",
+          label: "清除标签筛选",
+          count,
+          apply: () => setSelectedTags([]),
+        });
+      }
+    }
+
+    if (hasCategory && (hasSearch || hasTags)) {
+      const count = countMatching({
+        search,
+        filter: "all",
+        tags: selectedTags,
+      });
       if (count > 0) {
         options.push({
           key: "drop-category",
-          label: "在全部分类中搜索",
+          label: "在全部分类中查找",
           count,
           apply: () => setFilter("all"),
         });
@@ -259,7 +290,7 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
     }
 
     if (hasSearch) {
-      const count = countMatching({ search: "", filter });
+      const count = countMatching({ search: "", filter, tags: selectedTags });
       if (count > 0) {
         options.push({
           key: "drop-search",
@@ -270,7 +301,7 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
       }
     }
 
-    if (hasCategory || hasSearch) {
+    if (hasCategory || hasSearch || hasTags) {
       options.push({
         key: "reset",
         label: "查看全部档案",
@@ -278,12 +309,29 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
         apply: () => {
           setSearch("");
           setFilter("all");
+          setSelectedTags([]);
         },
       });
     }
 
     return options.slice(0, 2);
-  }, [prompts, filteredPrompts.length, filter, search, filterLabel, countMatching]);
+  }, [
+    prompts,
+    filteredPrompts.length,
+    filter,
+    search,
+    selectedTags,
+    filterLabel,
+    countMatching,
+  ]);
+
+  const toggleTag = useCallback((tag: string) => {
+    setSelectedTags((prev) =>
+      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+    );
+  }, []);
+
+  const clearTags = useCallback(() => setSelectedTags([]), []);
 
   const handleCreate = useCallback(
     async (data: NewPrompt) => {
@@ -481,6 +529,10 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
         filter={filter}
         onFilterChange={setFilter}
         counts={counts}
+        tagCounts={tagCounts}
+        selectedTags={selectedTags}
+        onToggleTag={toggleTag}
+        onClearTags={clearTags}
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
       />
@@ -512,6 +564,8 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
                   onEdit={openEditModal}
                   onDelete={handleDelete}
                   onToggleFavorite={handleToggleFavorite}
+                  onTagClick={toggleTag}
+                  activeTags={selectedTags}
                 />
               ))}
             </div>
@@ -526,6 +580,7 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
             filter !== "all" && filter !== "favorites" ? filter : undefined
           }
           prefillContent={prefillContent}
+          tagSuggestions={tagSuggestions}
           onSubmit={handleSubmit}
           onClose={() => {
             setModalOpen(false);

@@ -12,6 +12,9 @@ interface PromptCardProps {
   /** 传整条记录而不是 id —— 删除现在是延迟提交的，撤销时需要把内容放回去 */
   onDelete: (p: Prompt) => void;
   onToggleFavorite: (id: string, current: boolean) => void;
+  /** 点击卡片上的标签 chip 直接筛选 —— 否则标签只能靠手打搜索词命中 */
+  onTagClick: (tag: string) => void;
+  activeTags: string[];
   index?: number;
 }
 
@@ -21,6 +24,8 @@ export function PromptCard({
   onEdit,
   onDelete,
   onToggleFavorite,
+  onTagClick,
+  activeTags,
   index = 0,
 }: PromptCardProps) {
   const [copied, setCopied] = useState(false);
@@ -120,14 +125,25 @@ export function PromptCard({
         >
           {CATEGORY_LABELS[prompt.category]}
         </span>
-        {prompt.tags.slice(0, 4).map((tag) => (
-          <span
-            key={tag}
-            className="rounded-md bg-bg-hover px-2 py-0.5 text-[11px] text-text-muted"
-          >
-            {tag}
-          </span>
-        ))}
+        {prompt.tags.slice(0, 4).map((tag) => {
+          const active = activeTags.includes(tag);
+          return (
+            <button
+              key={tag}
+              type="button"
+              onClick={() => onTagClick(tag)}
+              aria-pressed={active}
+              title={`按标签筛选：${tag}`}
+              className={`max-w-[9rem] truncate rounded-md px-2 py-0.5 text-[11px] transition ${
+                active
+                  ? "bg-accent/20 text-text-primary"
+                  : "bg-bg-hover text-text-muted hover:text-text-secondary"
+              }`}
+            >
+              {tag}
+            </button>
+          );
+        })}
         {prompt.tags.length > 4 && (
           <span className="text-[11px] text-text-muted">
             +{prompt.tags.length - 4}

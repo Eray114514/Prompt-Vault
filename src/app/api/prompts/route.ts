@@ -7,6 +7,8 @@ import { constantTimeEqual } from "@/lib/auth";
 import { parseNewPrompt } from "@/lib/prompts";
 import {
   MAX_FAVORITES_RETURNED,
+  MAX_TAG_FILTER,
+  PROMPT_LIMITS,
   VALID_CATEGORIES,
   isValidCategory,
 } from "@/lib/types";
@@ -106,6 +108,17 @@ export async function GET(request: NextRequest) {
     rawCategories.length > 0 ? rawCategories : ["image_generation"];
   const q = searchParams.get("q")?.trim() ?? "";
 
+  // 可重复的 tag= 参数。多选之间是 AND（必须同时含全部标签）。
+  // 未知标签只会命中 0 条，不报 400 —— 标签是自由文本，没有"合法值"可言。
+  const selectedTags = Array.from(
+    new Set(
+      searchParams
+        .getAll("tag")
+        .map((tag) => tag.trim())
+        .filter((tag) => tag.length > 0 && tag.length <= PROMPT_LIMITS.tagLength)
+    )
+  ).slice(0, MAX_TAG_FILTER);
+
   const limitParam = searchParams.get("limit");
   const parsedLimit = Number.parseInt(limitParam ?? "10", 10);
   const limit = Math.min(
@@ -140,7 +153,11 @@ export async function GET(request: NextRequest) {
       .eq("is_favorite", favorite)
       .in("category", categories);
 
-    const filtered = orFilter ? base.or(orFilter) : base;
+    // 标签过滤用 .contains()（生成 tags=cs.{a,b}）而不是手拼 or 字符串：
+    // 转义交给 supabase-js，而且它与下面 q 的 or 组在顶层天然 AND、互不干扰。
+    const scoped =
+      selectedTags.length > 0 ? base.contains("tags", selectedTags) : base;
+    const filtered = orFilter ? scoped.or(orFilter) : scoped;
     return filtered
       .order("updated_at", { ascending: false })
       .returns<ApiPromptRow[]>();
@@ -173,6 +190,7 @@ export async function GET(request: NextRequest) {
         favoritesLimit: MAX_FAVORITES_RETURNED,
         categories,
         q: q || null,
+        tags: selectedTags,
       },
     },
     200,

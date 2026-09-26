@@ -70,6 +70,8 @@ export function ApiDocsClient({ baseUrl, writeEnabled }: ApiDocsClientProps) {
   const listExample = `curl -G "${apiBase}" \\
   --data-urlencode "category=image_generation" \\
   --data-urlencode "category=video_generation" \\
+  --data-urlencode "tag=poster" \\
+  --data-urlencode "tag=neon" \\
   --data-urlencode "q=midjourney" \\
   --data-urlencode "limit=10"`;
 
@@ -100,6 +102,7 @@ GET ${apiBase}
 参数：
 - category：可选，默认 image_generation；可重复传入多个值
 - q：可选，匹配标题、内容、备注（子串），以及标签（精确匹配）
+- tag：可选，可重复传入多个值；多选之间是 AND（必须同时含全部标签），最多 8 个
 - limit：可选，非收藏提示词数量上限，默认 10，最大 100
 
 示例：
@@ -244,6 +247,14 @@ ${categoryList}
                     <td className="px-4 py-2 text-xs">string</td>
                     <td className="px-4 py-2">
                       可选，子串匹配标题/内容/备注，精确匹配标签（不区分大小写）
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="px-4 py-2 font-mono text-xs">tag</td>
+                    <td className="px-4 py-2 text-xs">string</td>
+                    <td className="px-4 py-2">
+                      可选，可重复传入多个值。多选之间是 AND ——
+                      返回的记录必须同时含全部指定标签。最多 8 个；未知标签只命中 0 条，不报错。
                     </td>
                   </tr>
                   <tr>
