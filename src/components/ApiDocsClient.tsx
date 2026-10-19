@@ -119,6 +119,12 @@ export function ApiDocsClient({
   /** 示例里用库里真实存在的模型名；空库时退回一个中性占位。 */
   const sampleModel = modelCatalog[0]?.model ?? "Midjourney";
 
+  /**
+   * curl 的 -d 用单引号包 JSON，模型名里若出现单引号必须按 shell 规则转义，
+   * 否则整段示例会被截断。其余需要转义的字符（" \ 控制字符）在写入时已禁止。
+   */
+  const shellSampleModel = sampleModel.replace(/'/g, "'\\''");
+
   const modelList = modelCatalog.length
     ? modelCatalog
         .map((entry) => {
@@ -140,11 +146,7 @@ export function ApiDocsClient({
   --data-urlencode "category=image_generation" \\
   --data-urlencode "q=poster"`;
 
-  const buildCreateExample = (bearer: string) => {
-    // curl 的 -d 用单引号包 JSON，模型名里若出现单引号必须按 shell 规则转义，
-    // 否则整段示例会被截断。其余需要转义的字符（" \ 控制字符）在写入时已禁止。
-    const jsonModel = sampleModel.replace(/'/g, "'\\''");
-    return `curl -X POST "${apiBase}" \\
+  const buildCreateExample = (bearer: string) => `curl -X POST "${apiBase}" \\
   -H "Content-Type: application/json" \\
   -H "Authorization: Bearer ${bearer}" \\
   -d '{
@@ -152,16 +154,25 @@ export function ApiDocsClient({
     "content": "请根据以下内容生成一张未来城市夜景图...",
     "notes": "适合 16:9 海报构图，可搭配冷色霓虹光。",
     "category": "image_generation",
-    "model": "${jsonModel}",
+    "model": "${shellSampleModel}",
     "tags": ["future", "city", "night"]
   }'`;
-  };
+
+  const buildPatchExample = (bearer: string) => `curl -X PATCH "${apiBase}" \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer ${bearer}" \\
+  -d '{
+    "id": "<GET 返回的 data[].id>",
+    "model": "${shellSampleModel}",
+    "tags": ["future", "city", "night"]
+  }'`;
 
   const buildExportExample = (bearer: string) => `curl -H "Authorization: Bearer ${bearer}" \\
   "${exportUrl}?format=json" -o prompt-vault.json`;
 
   // 页面上永远是 $API_SECRET，避免密钥长时间停在屏幕 / 录屏 / 截屏里。
   const createExample = buildCreateExample(SECRET_VAR);
+  const patchExample = buildPatchExample(SECRET_VAR);
   const exportExample = buildExportExample(SECRET_VAR);
 
   /**
@@ -192,7 +203,7 @@ ${modelList}
 - q：可选，子串匹配标题 / 内容 / 备注 / 模型，精确匹配标签
 - tag：可选，可重复传入，最多 8 个；多值之间是 AND（必须同时含全部标签）
 - limit：可选，默认 10，最大 100。不传 model 时是"非收藏上限"，传 model 时是"总预算"
-返回字段：title、content、notes、model、category、tags、is_favorite；传 model 时额外带 model_match。
+返回字段：id、title、content、notes、model、category、tags、is_favorite；传 model 时额外带 model_match。id 用于 PATCH 定位。
 catalog（仅传 model 时）：顶层数组，最多 ${MAX_CATALOG_RETURNED} 条 {title, model, category, is_favorite}。
 这是"符合筛选、但没返回正文"的提示词清单，用来让你知道"还有这些存在"。
 先看标题判断有没有用；要正文就再用 q=<标题> 查一次。
@@ -224,7 +235,18 @@ ${tagsExample}
 示例：
 ${buildCreateExample(secretForText)}
 
-## 4. 整库导出  GET ${exportUrl}
+## 4. 修改提示词  PATCH ${apiBase}
+需要同一个 Bearer。请求体：
+- id：必填，来自 GET 返回的 data[].id 或 catalog[].id
+- title / content / notes / category / model / tags：可选，传了就必须合法；只更新传了的字段，其余保持原样
+- tags 是整体替换（要追加就先 GET 拿原数组再拼）；model 传 "" 清空；notes 传 "" 清空
+- 不接受 is_favorite —— 收藏是人工的"优质"信号，API 不写它
+- 未知字段会 400，不会被静默忽略；空对象也 400
+成功返回 { data: 更新后的完整行（含 updated_at） }；id 不存在返回 404。
+示例：
+${buildPatchExample(secretForText)}
+
+## 5. 整库导出  GET ${exportUrl}
 需要同一个 Bearer。参数 format=json|md（默认 json）、notes=1|0（默认含备注）。
 示例：
 ${buildExportExample(secretForText)}
@@ -269,7 +291,7 @@ ${categoryList}
               </p>
               <p>
                 <span className="font-medium text-text-primary">写入加锁。</span>
-                POST 一律要求 Bearer 密钥；服务端未配置{" "}
+                POST 与 PATCH 一律要求 Bearer 密钥；服务端未配置{" "}
                 <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
                   API_SECRET
                 </code>{" "}
@@ -462,8 +484,12 @@ ${categoryList}
               精确查 —— 不必为了确认「有没有」把整个库拉下来。
             </p>
             <p className="mb-4 text-sm leading-relaxed text-text-secondary">
-              返回字段：title、content、notes、model、category、tags、is_favorite；
-              传 model 时每条额外带 model_match。分页与搜索都在数据库侧完成，不会因为数据量增长而漏结果。
+              返回字段：id、title、content、notes、model、category、tags、is_favorite；
+              传 model 时每条额外带 model_match。{" "}
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                id
+              </code>{" "}
+              是修改提示词时唯一的定位依据。分页与搜索都在数据库侧完成，不会因为数据量增长而漏结果。
             </p>
 
             <div className="mb-4 overflow-hidden rounded-lg border border-border-subtle">
@@ -673,6 +699,118 @@ ${categoryList}
             </div>
 
             <CodeBlock code={createExample} label="cURL 示例" />
+            <p className="mt-3 text-xs leading-relaxed text-text-muted">
+              创建成功返回 201 + 完整行（含 id），这个 id 可以直接用于下面的 PATCH。
+            </p>
+          </section>
+
+          {/* PATCH */}
+          <section>
+            <div className="mb-3 flex items-center gap-3">
+              <span className="rounded-md bg-sky-500/15 px-2 py-1 text-xs font-semibold text-sky-400">
+                PATCH
+              </span>
+              <h2 className="font-display text-lg text-white">
+                修改提示词（需要密钥）
+              </h2>
+            </div>
+            <p className="mb-3 text-sm leading-relaxed text-text-secondary">
+              局部更新：只有请求体里出现的字段会被写入，其余保持原样 ——
+              agent 改一个标签不必先读全文再整体回写，也就不会因为漏字段把内容清空。
+              <code className="mx-1 rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                id
+              </code>
+              从{" "}
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                GET /api/prompts
+              </code>{" "}
+              的{" "}
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                data[].id
+              </code>{" "}
+              或{" "}
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                catalog[].id
+              </code>{" "}
+              取。
+            </p>
+            <p className="mb-4 text-sm leading-relaxed text-text-secondary">
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                tags
+              </code>{" "}
+              是整体替换，要追加就先 GET 拿原数组再拼；{" "}
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                model
+              </code>{" "}
+              /{" "}
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                notes
+              </code>{" "}
+              传空串即清空。
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                is_favorite
+              </code>{" "}
+              刻意不开放：收藏是人工的「优质」信号，不能被 agent 自己写。
+              未知字段直接 400，不会被静默忽略；id 不存在返回 404。
+            </p>
+
+            <div className="mb-4 overflow-hidden rounded-lg border border-border-subtle">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-bg-elevated/50 text-xs uppercase tracking-wider text-text-muted">
+                  <tr>
+                    <th className="px-4 py-2">字段</th>
+                    <th className="px-4 py-2">类型</th>
+                    <th className="px-4 py-2">说明</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border-subtle text-text-secondary">
+                  <tr>
+                    <td className="px-4 py-2 font-mono text-xs">id</td>
+                    <td className="px-4 py-2 text-xs">string</td>
+                    <td className="px-4 py-2">必填，GET 返回的提示词 UUID</td>
+                  </tr>
+                  <tr>
+                    <td className="px-4 py-2 font-mono text-xs">title</td>
+                    <td className="px-4 py-2 text-xs">string</td>
+                    <td className="px-4 py-2">可选，最长 200 字符，不能为空</td>
+                  </tr>
+                  <tr>
+                    <td className="px-4 py-2 font-mono text-xs">content</td>
+                    <td className="px-4 py-2 text-xs">string</td>
+                    <td className="px-4 py-2">可选，最长 20000 字符，不能为空</td>
+                  </tr>
+                  <tr>
+                    <td className="px-4 py-2 font-mono text-xs">notes</td>
+                    <td className="px-4 py-2 text-xs">string</td>
+                    <td className="px-4 py-2">可选，最长 5000 字符，空串清空</td>
+                  </tr>
+                  <tr>
+                    <td className="px-4 py-2 font-mono text-xs">category</td>
+                    <td className="px-4 py-2 text-xs">string</td>
+                    <td className="px-4 py-2">可选，见下方分类表</td>
+                  </tr>
+                  <tr>
+                    <td className="px-4 py-2 font-mono text-xs">model</td>
+                    <td className="px-4 py-2 text-xs">string</td>
+                    <td className="px-4 py-2">可选，最长 {PROMPT_LIMITS.model} 字符，空串清空</td>
+                  </tr>
+                  <tr>
+                    <td className="px-4 py-2 font-mono text-xs">tags</td>
+                    <td className="px-4 py-2 text-xs">string[]</td>
+                    <td className="px-4 py-2">可选，整体替换，最多 24 个，每个最长 50 字符</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <CodeBlock code={patchExample} label="cURL 示例" />
+            <p className="mt-3 text-xs leading-relaxed text-text-muted">
+              成功返回 200 +{" "}
+              <code className="rounded bg-bg-elevated px-1 py-0.5">
+                {"{ data: 更新后的完整行（含 updated_at） }"}
+              </code>
+              ；至少传一个可更新字段，空对象返回 400。
+            </p>
           </section>
 
           {/* Export */}

@@ -45,6 +45,7 @@
 - **Model-aware Retrieval** — Pass `model=` to `GET /api/prompts` and the response prioritizes that model, fills the remaining budget with other models (favorites first, flagged `model_match: false`), and returns a titles-only `catalog` of everything that exists but was not returned. The API docs inline the library's current model list, so an agent never has to enumerate it first.
 - **Tag Index API** — `GET /api/tags` returns `{tag, count}` only, so an agent can reuse existing tags instead of pulling the whole library just to enumerate them.
 - **Locked Write API** — `POST /api/prompts` always requires a bearer secret.
+- **Editable Write API** — `PATCH /api/prompts` updates only the fields you send. `GET` returns `id` on every row (and in `catalog`), so an agent can search, locate, and edit in place without re-uploading the whole record.
 - **Not Indexable** — `robots.txt`, `X-Robots-Tag` and page metadata all opt out of search engines.
 - **Dark Theme + Neon Index Cards** — Category-based accent colors on a dark archive palette.
 
@@ -130,6 +131,7 @@ Three deliberate layers, each with a different trade-off:
 | `GET /api/prompts` | **None** | Any cloud agent, anywhere, can read without plumbing a key. Public readability is an accepted trade-off. |
 | `GET /api/tags` | **None** | Tag names and counts only — no prompt bodies. Lets an agent pick consistent tags without downloading the library first. |
 | `POST /api/prompts` | `Authorization: Bearer <API_SECRET>`, always | No anonymous path to mutate data |
+| `PATCH /api/prompts` | `Authorization: Bearer <API_SECRET>`, always | Partial update by `id`; only the fields sent are written. `is_favorite` is intentionally not patchable — it is the human "worth surfacing" signal. |
 | `GET /api/export` | `Bearer <API_SECRET>` or `<CRON_SECRET>`; **503 when neither is configured** | It is a whole-library dump — it must never be public |
 
 **Session lifetime.** Browsers cap cookie expiry at 400 days (Chrome silently truncates anything longer), so "permanent" is implemented as a 400-day cookie plus sliding renewal: once the token is older than 30 days, the next request reissues it. As long as you visit occasionally, you never log in twice.
@@ -350,6 +352,7 @@ npm start
 - **按模型取用**：`GET /api/prompts?model=xxx` 优先返回该模型的提示词，不足上限时用其他模型补位（收藏优先，逐条标记 `model_match: false`），并把没返回正文的条目列进只含标题的 `catalog`；API 文档里直接内联当前模型清单
 - **标签索引接口**：`GET /api/tags` 只回 `{tag, count}`，agent 写之前能查重，不必为了数标签拉全库
 - **写入需要密钥**：`POST /api/prompts` 必须携带 Bearer 密钥
+- **可修改已有条目**：`PATCH /api/prompts` 按 `id` 局部更新，只写传了的字段；GET 的每一行（含 catalog）都带 `id`，agent 能"搜索 → 定位 → 原地改"
 - **整库导出**：`GET /api/export`（必须鉴权）用于备份，支持 JSON / Markdown
 - **不被搜索引擎收录**：robots.txt + X-Robots-Tag + 页面 meta 三重声明
 - 深色主题 + 霓虹索引卡视觉风格

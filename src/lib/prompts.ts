@@ -147,6 +147,124 @@ export function parseNewPrompt(body: unknown): ParseResult<NewPrompt> {
   };
 }
 
+const PROMPT_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** 校验并归一提示词 id。Server Action 与 REST API 共用同一份判断，避免正则漂移。 */
+export function normalizePromptId(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const id = value.trim();
+  return PROMPT_ID_PATTERN.test(id) ? id : null;
+}
+
+/**
+ * PATCH 允许修改的字段。
+ *
+ * `is_favorite` 刻意不在列：收藏是"这条值得优先给 agent 看"的人工信号，
+ * 一旦开放给 agent 写，这个信号就会被它自己的判断污染，模型查询的补位排序也就不可信了。
+ */
+export const PATCHABLE_PROMPT_FIELDS = [
+  "title",
+  "content",
+  "notes",
+  "category",
+  "model",
+  "tags",
+] as const;
+
+export type PromptPatch = Partial<NewPrompt>;
+
+/**
+ * PATCH 的输入校验：只校验"传了的字段"，但传了就必须合法。
+ *
+ * 与 parseNewPrompt 的三点区别：
+ * - 不要求字段齐全；
+ * - 拒绝未知字段 —— agent 把 `tags` 写成 `tag` 时，静默忽略会让它误以为改成功了；
+ * - 至少要有一个可更新字段，空对象直接 400，避免白跑一次 UPDATE。
+ */
+export function parsePromptPatch(body: unknown): ParseResult<PromptPatch> {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return { ok: false, error: "请求体必须是 JSON 对象" };
+  }
+
+  const source = body as Record<string, unknown>;
+  const allowed = new Set<string>(["id", ...PATCHABLE_PROMPT_FIELDS]);
+  const unknown = Object.keys(source).filter((key) => !allowed.has(key));
+  if (unknown.length > 0) {
+    return {
+      ok: false,
+      error: `不支持更新字段：${unknown.join("、")}；可更新：${PATCHABLE_PROMPT_FIELDS.join("、")}`,
+    };
+  }
+
+  const patch: PromptPatch = {};
+  let fieldCount = 0;
+
+  if ("title" in source) {
+    const title = parseTextField(source.title, "title", PROMPT_LIMITS.title, {
+      required: true,
+    });
+    if (!title.ok) return title;
+    patch.title = title.data;
+    fieldCount += 1;
+  }
+
+  if ("content" in source) {
+    const content = parseTextField(
+      source.content,
+      "content",
+      PROMPT_LIMITS.content,
+      { required: true }
+    );
+    if (!content.ok) return content;
+    patch.content = content.data;
+    fieldCount += 1;
+  }
+
+  if ("notes" in source) {
+    const notes = parseTextField(source.notes, "notes", PROMPT_LIMITS.notes, {
+      required: false,
+    });
+    if (!notes.ok) return notes;
+    patch.notes = notes.data;
+    fieldCount += 1;
+  }
+
+  if ("category" in source) {
+    if (!isValidCategory(source.category)) {
+      return {
+        ok: false,
+        error: `category 必须是以下之一：${VALID_CATEGORIES.join(", ")}`,
+      };
+    }
+    patch.category = source.category;
+    fieldCount += 1;
+  }
+
+  if ("model" in source) {
+    const model = normalizeModelName(source.model);
+    if (!model.ok) return model;
+    patch.model = model.data;
+    fieldCount += 1;
+  }
+
+  if ("tags" in source) {
+    const tags = parseTags(source.tags);
+    if (!tags.ok) return tags;
+    patch.tags = tags.data;
+    fieldCount += 1;
+  }
+
+  if (fieldCount === 0) {
+    return {
+      ok: false,
+      error: `没有可更新字段；至少提供：${PATCHABLE_PROMPT_FIELDS.join("、")}`,
+    };
+  }
+
+  return { ok: true, data: patch };
+}
+
 /** UI 与服务端共用的排序：最近创建的在前。 */
 export function sortByCreatedDesc(list: Prompt[]): Prompt[] {
   return [...list].sort(

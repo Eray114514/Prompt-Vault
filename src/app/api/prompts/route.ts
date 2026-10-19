@@ -3,9 +3,14 @@ export const dynamic = "force-dynamic";
 
 import { NextRequest } from "next/server";
 import { supabase } from "@/lib/supabase";
-import { secretMatches } from "@/lib/api-auth";
+import { bearerToken, secretMatches } from "@/lib/api-auth";
 import { baseHeaders, jsonResponse } from "@/lib/api-response";
-import { normalizeModelName, parseNewPrompt } from "@/lib/prompts";
+import {
+  normalizeModelName,
+  normalizePromptId,
+  parseNewPrompt,
+  parsePromptPatch,
+} from "@/lib/prompts";
 import {
   MAX_CATALOG_RETURNED,
   MAX_FAVORITES_RETURNED,
@@ -59,6 +64,7 @@ function buildOrFilter(raw: string): string | null {
 }
 
 type ApiPromptRow = {
+  id: string;
   title: string;
   content: string;
   notes: string;
@@ -70,6 +76,7 @@ type ApiPromptRow = {
 
 /** 目录条目：只带"有没有、是什么"，不带正文。agent 据此决定要不要精确回查。 */
 type CatalogEntry = {
+  id: string;
   title: string;
   model: string;
   category: string;
@@ -78,6 +85,14 @@ type CatalogEntry = {
 
 /** 查询范围：不限模型 / 仅目标模型 / 排除目标模型。 */
 type ModelScope = "all" | "match" | "other";
+
+/**
+ * GET 与 PATCH 共用的行字段。
+ *
+ * `id` 必须返回：它是 PATCH 唯一的定位依据，没有 id 的读取接口等于只读。
+ */
+const PROMPT_COLUMNS =
+  "id,title,content,notes,model,category,tags,is_favorite";
 
 export async function OPTIONS() {
   return new Response(null, { status: 204, headers: baseHeaders() });
@@ -138,8 +153,7 @@ export async function GET(request: NextRequest) {
 
   // category 现在始终返回：指定模型后一次可能跨多个分类，
   // agent 需要知道每条提示词属于哪一类才能决定怎么用。
-  const selectColumns: string =
-    "title,content,notes,model,category,tags,is_favorite";
+  const selectColumns: string = PROMPT_COLUMNS;
 
   const orFilter = q ? buildOrFilter(q) : null;
 
@@ -301,6 +315,7 @@ export async function GET(request: NextRequest) {
   const catalog: CatalogEntry[] = catalogPool
     .slice(0, MAX_CATALOG_RETURNED)
     .map((row) => ({
+      id: row.id,
       title: row.title,
       model: row.model,
       category: row.category,
@@ -344,10 +359,15 @@ export async function GET(request: NextRequest) {
   );
 }
 
-export async function POST(request: NextRequest) {
+/**
+ * POST / PATCH 共用的写接口守卫。
+ *
+ * 返回 null 表示鉴权通过；否则返回应直接发出的响应。语义与旧实现一致：
+ * 没配置 API_SECRET 一律 503，绝不退化成"无鉴权可写"。
+ */
+async function requireApiSecret(request: NextRequest): Promise<Response | null> {
   const expectedSecret = (process.env.API_SECRET ?? "").trim();
 
-  // 没有配置就直接拒绝服务，绝不退化成"无鉴权可写"。
   if (!expectedSecret) {
     return jsonResponse(
       {
@@ -358,14 +378,17 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const authorization = request.headers.get("authorization") ?? "";
-  const provided = authorization.startsWith("Bearer ")
-    ? authorization.slice("Bearer ".length).trim()
-    : "";
-
+  const provided = bearerToken(request);
   if (!provided || !(await secretMatches(provided, expectedSecret))) {
     return jsonResponse({ error: "Unauthorized" }, 401);
   }
+
+  return null;
+}
+
+export async function POST(request: NextRequest) {
+  const authFailure = await requireApiSecret(request);
+  if (authFailure) return authFailure;
 
   let body: unknown;
   try {
@@ -390,4 +413,63 @@ export async function POST(request: NextRequest) {
   }
 
   return jsonResponse({ data }, 201);
+}
+
+/**
+ * 修改已有提示词。
+ *
+ * 设计取舍：
+ * - **局部更新**：只写传入的字段，其余保持原样。agent 改一个标签不必先读全文再整体回写，
+ *   也就不会因为漏字段把内容清空。
+ * - **必须带 id**：id 由 GET 返回。标题可能重名，不能作为定位依据。
+ * - **不开放 is_favorite**：收藏是"这条值得优先给 agent 看"的人工信号，
+ *   让 agent 自己写会污染模型查询里的补位排序。
+ * - **tags 是整体替换**：想追加就先 GET 拿原数组再拼，语义明确、无隐式合并。
+ */
+export async function PATCH(request: NextRequest) {
+  const authFailure = await requireApiSecret(request);
+  if (authFailure) return authFailure;
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return jsonResponse({ error: "Invalid JSON body" }, 400);
+  }
+
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return jsonResponse({ error: "请求体必须是 JSON 对象" }, 400);
+  }
+
+  const id = normalizePromptId((body as Record<string, unknown>).id);
+  if (!id) {
+    return jsonResponse(
+      { error: "id 必填，且必须是 GET 返回的提示词 UUID" },
+      400
+    );
+  }
+
+  const parsed = parsePromptPatch(body);
+  if (!parsed.ok) {
+    return jsonResponse({ error: parsed.error }, 400);
+  }
+
+  // 用 select 返回更新后的行，而不是再做一次查询：并发下"改完再读"可能读到别人的改动。
+  const { data, error } = await supabase
+    .from("prompts")
+    .update({ ...parsed.data, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .select(`${PROMPT_COLUMNS},updated_at`)
+    .returns<Array<ApiPromptRow & { updated_at: string }>>();
+
+  if (error) {
+    return jsonResponse({ error: error.message }, 500);
+  }
+
+  // 空数组 = id 合法但库里没有这条。不把"不存在"混进 500，agent 才能区分该重试还是该改 id。
+  if (!data || data.length === 0) {
+    return jsonResponse({ error: "Prompt not found" }, 404);
+  }
+
+  return jsonResponse({ data: data[0] }, 200);
 }

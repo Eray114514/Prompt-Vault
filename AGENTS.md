@@ -39,7 +39,7 @@ src/
     error.tsx           ← 错误边界（客户端组件）
     loading.tsx         ← 加载骨架
     robots.ts           ← 全站 Disallow
-    api/prompts/route.ts  ← REST API (GET public incl. ?model= mode, POST bearer-only; Edge runtime)
+    api/prompts/route.ts  ← REST API (GET public incl. ?model= mode; POST/PATCH bearer-only; Edge runtime)
     api/tags/route.ts     ← 标签总览 {tag,count}（public read-only，给 agent 写前查重用）
     api/export/route.ts   ← 整库导出（bearer）
     api-docs/page.tsx   ← Self-hosted API documentation page
@@ -66,6 +66,7 @@ src/
 | `GET /api/prompts` | **None, by design.** Cloud agents must be able to read without a key. Public readability is an accepted trade-off. |
 | `GET /api/tags` | **None.** Tag names + counts only — no prompt bodies. Exists so an agent can reuse existing tags instead of pulling the whole library just to enumerate them. |
 | `POST /api/prompts` | `Authorization: Bearer <API_SECRET>`, always. If `API_SECRET` is unset the route returns **503**, never an unauthenticated write. |
+| `PATCH /api/prompts` | Same bearer guard as POST (`requireApiSecret`). Partial update by `id`; rejects unknown fields and empty patches with 400; 404 when the id does not exist. `is_favorite` is not patchable — it is the human quality signal that ranks model-mode fill. |
 | `GET /api/export` | `Bearer <API_SECRET>` or `<CRON_SECRET>`. **503 when neither is configured.** Whole-library dump — never make it public. |
 
 **`/api-docs` deliberately hands the logged-in user the `API_SECRET` in cleartext.** The page reads it in the Server Component (after its own `requireSession()`), passes it to `ApiDocsClient` as a prop, and the "复制文档" payload embeds it so the pasted doc is immediately usable by an agent without a manual fill-in. This is an accepted trade-off, not a leak:
@@ -96,6 +97,8 @@ Key constraints when touching auth:
 - **Don't hand-escape values into `or=(...)`.** `sanitizeSearchTerm` strips the structural characters (`,`, `(`, `)`, `{`, `}`, `"`, `\`, `%`, `_`) rather than escaping them, then wraps the remainder in double quotes. Stripping beats nesting escapes — LIKE has its own backslash layer, and doubling the two together is where bugs live.
 - **`model` is a first-class column, not a tag.** It is single-valued, renders before the free-form tags, and is filtered in SQL via `ilike` (case-insensitive). `normalizeModelName` rejects `,(){}"\%*` at the write boundary and at the API query boundary — the value goes straight into a PostgREST filter, so structural characters must never reach it. `''` means "no model"; `aggregateModels` excludes it.
 - **Model-mode GET rejects nothing for unknown names.** A legal-but-unknown model returns `modelMatched.total: 0` plus `meta.availableModels` (aggregated from the same category/tag/q scope) so an agent can correct itself without a second call.
+- **Every GET row carries `id`** (and so does `catalog`). It is the only stable locator for PATCH — titles are not unique. Don't drop it to save bytes.
+- **PATCH is partial by construction.** `parsePromptPatch` validates only the keys present, rejects unknown ones (an agent's `tag` typo must not look like success), and requires at least one field. `tags` replaces the whole array, `model` / `notes` clear via `""`. The response is the row returned by `.select()`; never follow the update with a second read, which could observe someone else's write.
 
 The `model` column needs a one-time Supabase migration; without it every `select("*")` fails:
 

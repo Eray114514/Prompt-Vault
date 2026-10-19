@@ -5,19 +5,12 @@ import { supabase } from "./supabase";
 import {
   aggregateModels,
   normalizeModelName,
+  normalizePromptId,
   parseNewPrompt,
   type ModelCount,
 } from "./prompts";
 import { requireSession } from "./session";
 import type { ActionResult, NewPrompt, Prompt } from "./types";
-
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function assertId(id: unknown): string | null {
-  if (typeof id !== "string" || !UUID_PATTERN.test(id)) return null;
-  return id;
-}
 
 const PROMPTS_PAGE_SIZE = 1000;
 /** 防御性上限：50 页 = 5 万条，避免分页循环因为意外返回值而无限转。 */
@@ -103,7 +96,7 @@ export async function updatePrompt(
 ): Promise<ActionResult<Prompt>> {
   await requireSession();
 
-  const promptId = assertId(id);
+  const promptId = normalizePromptId(id);
   if (!promptId) return { ok: false, error: "无效的 id" };
 
   const parsed = parseNewPrompt(input);
@@ -123,7 +116,7 @@ export async function updatePrompt(
 export async function deletePrompt(id: unknown): Promise<ActionResult<null>> {
   await requireSession();
 
-  const promptId = assertId(id);
+  const promptId = normalizePromptId(id);
   if (!promptId) return { ok: false, error: "无效的 id" };
 
   const { error } = await supabase.from("prompts").delete().eq("id", promptId);
@@ -137,7 +130,7 @@ export async function toggleFavorite(
 ): Promise<ActionResult<null>> {
   await requireSession();
 
-  const promptId = assertId(id);
+  const promptId = normalizePromptId(id);
   if (!promptId) return { ok: false, error: "无效的 id" };
 
   const { error } = await supabase
@@ -172,7 +165,7 @@ function parseBulkIds(
   const seen = new Set<string>();
   const ids: string[] = [];
   for (const item of value) {
-    const id = assertId(item);
+    const id = normalizePromptId(item);
     if (!id || seen.has(id)) continue;
     seen.add(id);
     ids.push(id);
