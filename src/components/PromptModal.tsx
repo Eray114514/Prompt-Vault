@@ -3,11 +3,14 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import type { Prompt, NewPrompt, Category } from "@/lib/types";
 import { CATEGORIES, CATEGORY_COLORS, PROMPT_LIMITS } from "@/lib/types";
+import { sanitizeModelDraft } from "@/lib/prompts";
 import { CloseIcon } from "./Icons";
 import { useFocusTrap } from "./useFocusTrap";
 
 const DEFAULT_CATEGORY: Category = "image_generation";
 const MAX_SUGGESTIONS = 8;
+/** 快捷模型 chip 的数量：够覆盖常用模型，又不至于把表单撑长。 */
+const MAX_MODEL_CHIPS = 6;
 
 interface PromptModalProps {
   prompt: Prompt | null;
@@ -21,6 +24,10 @@ interface PromptModalProps {
   prefillContent?: string;
   /** 全量标签（父级聚合后传入，按使用次数降序）。弹窗只拿得到单条 prompt，自己算不出候选。 */
   tagSuggestions?: string[];
+  /** 新建时默认带入的模型 —— 与标签同理，继承当前筛选位置。 */
+  defaultModel?: string;
+  /** 全量模型（父级聚合后传入，按使用次数降序）。 */
+  modelSuggestions?: string[];
   onSubmit: (data: NewPrompt) => Promise<void>;
   onClose: () => void;
 }
@@ -31,6 +38,8 @@ export function PromptModal({
   initialTags,
   prefillContent,
   tagSuggestions = [],
+  defaultModel,
+  modelSuggestions = [],
   onSubmit,
   onClose,
 }: PromptModalProps) {
@@ -38,13 +47,17 @@ export function PromptModal({
   const [content, setContent] = useState("");
   const [notes, setNotes] = useState("");
   const [category, setCategory] = useState<Category>(DEFAULT_CATEGORY);
+  const [model, setModel] = useState("");
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [suggestOpen, setSuggestOpen] = useState(false);
   const [highlight, setHighlight] = useState(-1);
+  const [modelOpen, setModelOpen] = useState(false);
+  const [modelHighlight, setModelHighlight] = useState(-1);
 
   const tagInputRef = useRef<HTMLInputElement>(null);
+  const modelInputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   // 只在挂载时快照一次带入的标签。若直接把它写进下面 useEffect 的依赖，
   // 父组件任何一次重渲染都会重置草稿 —— 用户改到一半的标签会被抹掉。
@@ -52,6 +65,7 @@ export function PromptModal({
   // 用一个 ref 镜像下拉开关状态：全局 Escape 监听是原生监听，
   // 读 state 会读到本次事件之前的旧值。
   const suggestOpenRef = useRef(false);
+  const modelOpenRef = useRef(false);
 
   useFocusTrap(dialogRef, true);
 
@@ -61,29 +75,37 @@ export function PromptModal({
       setContent(prompt.content);
       setNotes(prompt.notes ?? "");
       setCategory(prompt.category);
+      setModel(prompt.model ?? "");
       setTags(prompt.tags);
     } else {
-      // 新建：分类与标签都继承当前筛选的位置
+      // 新建：分类、模型与标签都继承当前筛选的位置
       setTitle("");
       setContent(prefillContent ?? "");
       setNotes("");
       setCategory(defaultCategory ?? DEFAULT_CATEGORY);
+      setModel(defaultModel ?? "");
       setTags(inheritedTagsRef.current);
     }
     setTagInput("");
     setSuggestOpen(false);
     setHighlight(-1);
-  }, [prompt, prefillContent, defaultCategory]);
+    setModelOpen(false);
+    setModelHighlight(-1);
+  }, [prompt, prefillContent, defaultCategory, defaultModel]);
 
   useEffect(() => {
     suggestOpenRef.current = suggestOpen;
   }, [suggestOpen]);
 
   useEffect(() => {
+    modelOpenRef.current = modelOpen;
+  }, [modelOpen]);
+
+  useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       // 补全下拉打开时，Esc 只该关下拉，不能顺手把整个弹窗也关掉
-      if (suggestOpenRef.current) return;
+      if (suggestOpenRef.current || modelOpenRef.current) return;
       onClose();
     };
     window.addEventListener("keydown", handler);
@@ -105,6 +127,72 @@ export function PromptModal({
     // 前缀命中优先于子串命中
     return [...startsWith, ...contains].slice(0, MAX_SUGGESTIONS);
   }, [tagInput, tagSuggestions, tags]);
+
+  /**
+   * 模型候选。输入即过滤，前缀优先；未输入时把最常用的几个直接摆出来，
+   * 让"快捷选择"成立 —— 这是这个字段存在的主要价值。
+   */
+  const modelQuery = model.trim().toLowerCase();
+  const modelOptions = useMemo(() => {
+    const pool = modelSuggestions;
+    if (!modelQuery) return pool.slice(0, MAX_SUGGESTIONS);
+    const startsWith = pool.filter((item) =>
+      item.toLowerCase().startsWith(modelQuery)
+    );
+    const contains = pool.filter(
+      (item) =>
+        !item.toLowerCase().startsWith(modelQuery) &&
+        item.toLowerCase().includes(modelQuery)
+    );
+    return [...startsWith, ...contains].slice(0, MAX_SUGGESTIONS);
+  }, [modelQuery, modelSuggestions]);
+
+  /** 输入了一个库里还没有的写法 —— 提交时它就是"新模型"。 */
+  const isNewModel =
+    modelQuery.length > 0 &&
+    !modelSuggestions.some((item) => item.toLowerCase() === modelQuery);
+
+  const closeModelSuggestions = () => {
+    setModelOpen(false);
+    setModelHighlight(-1);
+  };
+
+  const handleModelKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const listOpen = modelOpen && modelOptions.length > 0;
+
+    if (listOpen) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setModelHighlight((h) => (h + 1) % modelOptions.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setModelHighlight((h) => (h <= 0 ? modelOptions.length - 1 : h - 1));
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        closeModelSuggestions();
+        return;
+      }
+      if (e.key === "Enter" && modelHighlight >= 0) {
+        e.preventDefault();
+        setModel(modelOptions[modelHighlight]);
+        closeModelSuggestions();
+        return;
+      }
+    }
+
+    // Enter 在表单里默认是提交。模型框里的 Enter 只用来"确认这个值"，
+    // 否则挑模型会把整张表单提前发出去。
+    if (e.key === "Enter") {
+      e.preventDefault();
+      setModel((prev) => prev.trim());
+      closeModelSuggestions();
+    }
+  };
 
   const addTag = (raw: string) => {
     const value = raw.trim();
@@ -202,6 +290,7 @@ export function PromptModal({
         content: content.trim(),
         notes: notes.trim(),
         category,
+        model: model.trim(),
         tags,
       });
     } finally {
@@ -300,6 +389,143 @@ export function PromptModal({
                 })}
               </div>
             </fieldset>
+
+            {/* 模型：单独一个单值字段，不是标签。快捷点选已有模型，输入新名字即新建。 */}
+            <div>
+              <label
+                htmlFor="prompt-model"
+                className="mb-1.5 block text-[11px] tracking-wider text-text-muted"
+              >
+                模型
+              </label>
+              <div className="relative">
+                <div
+                  className="flex min-h-[42px] items-center gap-2 rounded-lg border border-border-subtle bg-bg-input px-2.5 py-1.5 transition focus-within:border-accent focus-within:shadow-[0_0_0_3px_var(--accent-soft)]"
+                  onClick={() => modelInputRef.current?.focus()}
+                >
+                  <span aria-hidden="true" className="shrink-0 text-[10px] text-accent/80">
+                    ◇
+                  </span>
+                  <input
+                    id="prompt-model"
+                    ref={modelInputRef}
+                    type="text"
+                    value={model}
+                    onChange={(e) => {
+                      setModel(sanitizeModelDraft(e.target.value));
+                      setModelOpen(true);
+                      setModelHighlight(-1);
+                    }}
+                    onFocus={() => setModelOpen(true)}
+                    onKeyDown={handleModelKeyDown}
+                    onBlur={() => {
+                      setModel((prev) => prev.trim());
+                      closeModelSuggestions();
+                    }}
+                    placeholder="例如 Midjourney / GPT-4o（留空表示不限）"
+                    maxLength={PROMPT_LIMITS.model}
+                    autoComplete="off"
+                    role="combobox"
+                    aria-autocomplete="list"
+                    aria-expanded={modelOpen && modelOptions.length > 0}
+                    aria-controls="prompt-model-listbox"
+                    aria-activedescendant={
+                      modelHighlight >= 0
+                        ? `prompt-model-option-${modelHighlight}`
+                        : undefined
+                    }
+                    aria-describedby="prompt-model-hint"
+                    className="min-w-0 flex-1 bg-transparent py-1 text-sm text-text-primary placeholder-text-muted outline-none"
+                  />
+                  {model && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setModel("");
+                        modelInputRef.current?.focus();
+                      }}
+                      className="shrink-0 rounded px-1 text-text-muted transition hover:text-white"
+                      aria-label="清除模型"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+
+                {modelOpen && modelOptions.length > 0 && (
+                  <ul
+                    id="prompt-model-listbox"
+                    role="listbox"
+                    aria-label="模型建议"
+                    className="scrollbar-thin absolute left-0 right-0 top-full z-20 mt-1 max-h-48 overflow-y-auto rounded-lg border border-border-subtle bg-bg-elevated py-1 shadow-lg"
+                  >
+                    {modelOptions.map((item, index) => (
+                      <li
+                        key={item}
+                        id={`prompt-model-option-${index}`}
+                        role="option"
+                        aria-selected={index === modelHighlight}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setModel(item);
+                          closeModelSuggestions();
+                        }}
+                        onMouseEnter={() => setModelHighlight(index)}
+                        className={`flex cursor-pointer items-center gap-1.5 truncate px-3 py-1.5 font-mono text-[11px] transition ${
+                          index === modelHighlight
+                            ? "bg-bg-hover text-text-primary"
+                            : "text-text-secondary"
+                        }`}
+                      >
+                        <span aria-hidden="true" className="text-[8px] text-accent/60">
+                          ◇
+                        </span>
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              {modelSuggestions.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {modelSuggestions.slice(0, MAX_MODEL_CHIPS).map((item) => {
+                    const active = modelQuery === item.toLowerCase();
+                    return (
+                      <button
+                        key={item}
+                        type="button"
+                        onClick={() => {
+                          setModel(item);
+                          closeModelSuggestions();
+                        }}
+                        aria-pressed={active}
+                        title={`使用模型：${item}`}
+                        className={`inline-flex max-w-full items-center gap-1 rounded-[5px] border px-1.5 py-0.5 font-mono text-[10px] transition ${
+                          active
+                            ? "border-accent/55 bg-accent/15 text-text-primary"
+                            : "border-white/10 bg-white/[0.04] text-text-muted hover:border-white/25 hover:text-text-secondary"
+                        }`}
+                      >
+                        <span aria-hidden="true" className="text-[8px] text-accent/70">
+                          ◇
+                        </span>
+                        <span className="truncate">{item}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              <p id="prompt-model-hint" className="mt-1.5 text-[11px] text-text-muted">
+                {isNewModel ? (
+                  <span className="text-accent">将新建模型「{model.trim()}」</span>
+                ) : (
+                  "留空表示不限模型 · 点选已有模型，或直接输入新名字"
+                )}
+              </p>
+            </div>
 
             <div>
               <label

@@ -6,8 +6,11 @@ import {
   CATEGORIES,
   CATEGORY_LABELS,
   CATEGORY_COLORS,
+  MAX_CATALOG_RETURNED,
   MAX_FAVORITES_RETURNED,
+  PROMPT_LIMITS,
 } from "@/lib/types";
+import type { ModelCount } from "@/lib/prompts";
 import {
   CopyIcon,
   CheckIcon,
@@ -29,6 +32,13 @@ interface ApiDocsClientProps {
    * （`/api-docs` 在 next.config.mjs 里单独加了 Cache-Control: no-store）。
    */
   apiSecret: string | null;
+  /**
+   * 库中已有的模型及计数。直接内联进文档，agent 拿到复制文本就知道有哪些模型名
+   * 可用，不必先发一次请求枚举 —— 这是这个字段唯一的存在理由。
+   */
+  modelCatalog: ModelCount[];
+  /** 模型清单的快照日期（YYYY-MM-DD），写进文档避免 agent 误以为是实时数据。 */
+  generatedAt: string;
 }
 
 /** 页面上展示的示例用 shell 变量，真实密钥只在"复制"时展开。 */
@@ -86,7 +96,12 @@ function CopyButton({
   );
 }
 
-export function ApiDocsClient({ baseUrl, apiSecret }: ApiDocsClientProps) {
+export function ApiDocsClient({
+  baseUrl,
+  apiSecret,
+  modelCatalog,
+  generatedAt,
+}: ApiDocsClientProps) {
   const apiBase = `${baseUrl}/api/prompts`;
   const tagsUrl = `${baseUrl}/api/tags`;
   const exportUrl = `${baseUrl}/api/export`;
@@ -101,19 +116,35 @@ export function ApiDocsClient({ baseUrl, apiSecret }: ApiDocsClientProps) {
     (c) => `- ${c.value}（${CATEGORY_LABELS[c.value]}）`
   ).join("\n");
 
+  /** 示例里用库里真实存在的模型名；空库时退回一个中性占位。 */
+  const sampleModel = modelCatalog[0]?.model ?? "Midjourney";
+
+  const modelList = modelCatalog.length
+    ? modelCatalog
+        .map((entry) => {
+          const cats = entry.categories
+            .map((category) => CATEGORY_LABELS[category] ?? category)
+            .join(" / ");
+          return `- ${entry.model}（${entry.count} 条 · ${cats}）`;
+        })
+        .join("\n")
+    : "- （库中还没有标注模型的提示词）";
+
   const listExample = `curl -G "${apiBase}" \\
   --data-urlencode "category=image_generation" \\
-  --data-urlencode "category=video_generation" \\
-  --data-urlencode "tag=poster" \\
-  --data-urlencode "tag=neon" \\
-  --data-urlencode "q=midjourney" \\
+  --data-urlencode "model=${sampleModel}" \\
+  --data-urlencode "q=poster" \\
   --data-urlencode "limit=10"`;
 
   const tagsExample = `curl -G "${tagsUrl}" \\
   --data-urlencode "category=image_generation" \\
   --data-urlencode "q=poster"`;
 
-  const buildCreateExample = (bearer: string) => `curl -X POST "${apiBase}" \\
+  const buildCreateExample = (bearer: string) => {
+    // curl 的 -d 用单引号包 JSON，模型名里若出现单引号必须按 shell 规则转义，
+    // 否则整段示例会被截断。其余需要转义的字符（" \ 控制字符）在写入时已禁止。
+    const jsonModel = sampleModel.replace(/'/g, "'\\''");
+    return `curl -X POST "${apiBase}" \\
   -H "Content-Type: application/json" \\
   -H "Authorization: Bearer ${bearer}" \\
   -d '{
@@ -121,8 +152,10 @@ export function ApiDocsClient({ baseUrl, apiSecret }: ApiDocsClientProps) {
     "content": "请根据以下内容生成一张未来城市夜景图...",
     "notes": "适合 16:9 海报构图，可搭配冷色霓虹光。",
     "category": "image_generation",
+    "model": "${jsonModel}",
     "tags": ["future", "city", "night"]
   }'`;
+  };
 
   const buildExportExample = (bearer: string) => `curl -H "Authorization: Bearer ${bearer}" \\
   "${exportUrl}?format=json" -o prompt-vault.json`;
@@ -143,14 +176,27 @@ export function ApiDocsClient({ baseUrl, apiSecret }: ApiDocsClientProps) {
 Authorization: Bearer ${secretForText}
 GET 不需要凭据；POST 与整库导出必须带上上面这行完整请求头。
 
+## 本库已有模型（${generatedAt} 快照）
+${modelList}
+写提示词时优先复用上面的写法。匹配不区分大小写，展示保留库里的原写法；确实需要新模型就直接写新名字。
+
 ## 1. 读取提示词  GET ${apiBase}
-返回最多 ${MAX_FAVORITES_RETURNED} 条收藏提示词，以及最多 limit 条非收藏提示词。
+不传 model：返回最多 ${MAX_FAVORITES_RETURNED} 条收藏提示词，以及最多 limit 条非收藏提示词。
+传 model（agent 优先用这个）：limit 变成总条数预算 ——
+  1. 先返回该模型的提示词，收藏在前；
+  2. 不足 limit 时用其他模型补足，同样收藏在前；补位条目逐条带 model_match=false，表示"不属于目标模型"；
+  3. 目标模型 0 命中时，meta.availableModels 给出当前范围内真实存在的模型名。
 参数：
+- model：可选，按模型过滤，不区分大小写
 - category：可选，可重复传入；默认 image_generation
-- q：可选，子串匹配标题 / 内容 / 备注，精确匹配标签
+- q：可选，子串匹配标题 / 内容 / 备注 / 模型，精确匹配标签
 - tag：可选，可重复传入，最多 8 个；多值之间是 AND（必须同时含全部标签）
-- limit：可选，非收藏条数上限，默认 10，最大 100
-返回字段：title、content、notes、tags、is_favorite；仅当传入多个 category 时额外带 category。
+- limit：可选，默认 10，最大 100。不传 model 时是"非收藏上限"，传 model 时是"总预算"
+返回字段：title、content、notes、model、category、tags、is_favorite；传 model 时额外带 model_match。
+catalog（仅传 model 时）：顶层数组，最多 ${MAX_CATALOG_RETURNED} 条 {title, model, category, is_favorite}。
+这是"符合筛选、但没返回正文"的提示词清单，用来让你知道"还有这些存在"。
+先看标题判断有没有用；要正文就再用 q=<标题> 查一次。
+meta 里 modelMatched.{returned,total} 是目标模型的给到数/总数；catalogTruncated=true 表示目录也没列全。
 示例：
 ${listExample}
 
@@ -172,6 +218,7 @@ ${tagsExample}
 - title：必填，最长 200 字符
 - content：必填，最长 20000 字符
 - category：必填，取值见文末
+- model：可选，模型名，最长 ${PROMPT_LIMITS.model} 字符，不能含 , ( ) { } " \\ % *；优先用上面模型清单里的写法
 - notes：可选，最长 5000 字符
 - tags：可选，最多 24 个，每个最长 50 字符。**先从上面的接口取已有标签**
 示例：
@@ -312,6 +359,51 @@ ${categoryList}
             <CodeBlock code={baseUrl} label="BASE URL" />
           </section>
 
+          {/* Models */}
+          <section>
+            <div className="mb-3 flex items-center gap-3">
+              <span className="rounded-md bg-white/10 px-2 py-1 text-xs font-semibold text-text-primary">
+                MODEL
+              </span>
+              <h2 className="font-display text-lg text-white">本库已有模型</h2>
+            </div>
+            <p className="mb-4 text-sm leading-relaxed text-text-secondary">
+              下面是库里已标注的模型（{generatedAt} 快照）。写提示词时直接复用这些写法，
+              不要造近义词或只差大小写的变体。匹配本身不区分大小写，但展示会保留库里的原写法。
+              复制上方文档时，这份清单会一并写进指令包，agent 不需要先调接口枚举。
+            </p>
+
+            {modelCatalog.length === 0 ? (
+              <p className="rounded-lg border border-border-subtle bg-bg-surface/50 px-4 py-3 text-sm text-text-muted">
+                库中还没有标注模型的提示词。在网页端新建或编辑时填写「模型」即可。
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {modelCatalog.map((entry) => (
+                  <div
+                    key={entry.model}
+                    className="flex items-center gap-3 rounded-lg border border-border-subtle bg-bg-surface/50 px-4 py-3"
+                  >
+                    <span aria-hidden="true" className="text-[10px] text-accent/80">
+                      ◇
+                    </span>
+                    <code className="min-w-0 flex-1 truncate font-mono text-xs text-text-primary">
+                      {entry.model}
+                    </code>
+                    <span className="shrink-0 text-[11px] text-text-muted">
+                      {entry.categories
+                        .map((category) => CATEGORY_LABELS[category] ?? category)
+                        .join(" / ")}
+                    </span>
+                    <span className="shrink-0 tabular-nums text-xs text-text-secondary">
+                      {entry.count} 条
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
           {/* GET */}
           <section>
             <div className="mb-3 flex items-center gap-3">
@@ -322,21 +414,56 @@ ${categoryList}
                 获取提示词列表（公开，无需密钥）
               </h2>
             </div>
-            <p className="mb-3 text-sm text-text-secondary">
-              返回最多 {MAX_FAVORITES_RETURNED} 条收藏的提示词，以及最多{" "}
+            <p className="mb-3 text-sm leading-relaxed text-text-secondary">
+              不传 model 时：返回最多 {MAX_FAVORITES_RETURNED} 条收藏提示词，以及最多{" "}
               <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
                 limit
               </code>{" "}
-              条非收藏提示词。默认返回{" "}
+              条非收藏提示词。默认查{" "}
               <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
                 image_generation
-              </code>{" "}
-              分类；不传 category 时等效于 category=image_generation。如需多个分类，可重复传入
-              category 参数。返回字段仅包含 title、content、notes、tags、
-              is_favorite；仅当传入多个 category 时额外返回 category。
+              </code>
+              ，不传 category 时等效于 category=image_generation；多个分类就重复传
+              category。
             </p>
-            <p className="mb-4 text-sm text-text-secondary">
-              分页与搜索都在数据库侧完成，不会因为数据量增长而漏结果。
+            <p className="mb-3 text-sm leading-relaxed text-text-secondary">
+              传{" "}
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                model
+              </code>{" "}
+              时（agent 推荐用法）：
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                limit
+              </code>{" "}
+              变成总条数预算 —— 先返回该模型的提示词（收藏在前），不足时用其他模型补足
+              （同样收藏在前）。补位条目带{" "}
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                model_match: false
+              </code>
+              ，明确表示「不是给这个模型用的」；目标模型 0 命中时，
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                meta.availableModels
+              </code>{" "}
+              会列出当前范围内真实存在的模型名，便于改查。
+            </p>
+            <p className="mb-3 text-sm leading-relaxed text-text-secondary">
+              传 model 还会返回顶层{" "}
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                catalog
+              </code>
+              ：最多 {MAX_CATALOG_RETURNED} 条{" "}
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                {"{ title, model, category, is_favorite }"}
+              </code>
+              ，是「符合筛选、但没返回正文」的清单。先看名字判断有没有用，要正文再用{" "}
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                q=标题
+              </code>{" "}
+              精确查 —— 不必为了确认「有没有」把整个库拉下来。
+            </p>
+            <p className="mb-4 text-sm leading-relaxed text-text-secondary">
+              返回字段：title、content、notes、model、category、tags、is_favorite；
+              传 model 时每条额外带 model_match。分页与搜索都在数据库侧完成，不会因为数据量增长而漏结果。
             </p>
 
             <div className="mb-4 overflow-hidden rounded-lg border border-border-subtle">
@@ -350,6 +477,14 @@ ${categoryList}
                 </thead>
                 <tbody className="divide-y divide-border-subtle text-text-secondary">
                   <tr>
+                    <td className="px-4 py-2 font-mono text-xs">model</td>
+                    <td className="px-4 py-2 text-xs">string</td>
+                    <td className="px-4 py-2">
+                      可选，按模型过滤，不区分大小写。传了就把 limit 当作总预算，
+                      并返回 model_match 与顶层 catalog
+                    </td>
+                  </tr>
+                  <tr>
                     <td className="px-4 py-2 font-mono text-xs">category</td>
                     <td className="px-4 py-2 text-xs">string</td>
                     <td className="px-4 py-2">
@@ -360,7 +495,7 @@ ${categoryList}
                     <td className="px-4 py-2 font-mono text-xs">q</td>
                     <td className="px-4 py-2 text-xs">string</td>
                     <td className="px-4 py-2">
-                      可选，子串匹配标题/内容/备注，精确匹配标签（不区分大小写）
+                      可选，子串匹配标题/内容/备注/模型，精确匹配标签（不区分大小写）
                     </td>
                   </tr>
                   <tr>
@@ -375,7 +510,8 @@ ${categoryList}
                     <td className="px-4 py-2 font-mono text-xs">limit</td>
                     <td className="px-4 py-2 text-xs">number</td>
                     <td className="px-4 py-2">
-                      可选，非收藏提示词数量上限，默认 10，最大 100
+                      可选，默认 10，最大 100。不传 model 时是非收藏条数上限；
+                      传 model 时是返回的总条数预算
                     </td>
                   </tr>
                 </tbody>
@@ -474,7 +610,7 @@ ${categoryList}
               </code>
               ，先在上面那张卡片里复制出来，或直接复制整份文档。
             </p>
-            <p className="mb-4 text-sm text-text-secondary">
+            <p className="mb-4 text-sm leading-relaxed text-text-secondary">
               <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
                 tags
               </code>{" "}
@@ -483,6 +619,10 @@ ${categoryList}
                 GET /api/tags
               </code>{" "}
               看已有写法再填，避免造出只差大小写的近义标签。
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                model
+              </code>{" "}
+              则直接复用页面顶部「本库已有模型」里的写法；填一个全新的名字也合法，等同于新增模型。
             </p>
 
             <div className="mb-4 overflow-hidden rounded-lg border border-border-subtle">
@@ -514,6 +654,14 @@ ${categoryList}
                     <td className="px-4 py-2 font-mono text-xs">category</td>
                     <td className="px-4 py-2 text-xs">string</td>
                     <td className="px-4 py-2">必填，见下方分类表</td>
+                  </tr>
+                  <tr>
+                    <td className="px-4 py-2 font-mono text-xs">model</td>
+                    <td className="px-4 py-2 text-xs">string</td>
+                    <td className="px-4 py-2">
+                      可选，模型名，最长 {PROMPT_LIMITS.model} 字符；不能含 , ( ) {"{ }"}{" "}
+                      &quot; \ % *。留空表示不限模型
+                    </td>
                   </tr>
                   <tr>
                     <td className="px-4 py-2 font-mono text-xs">tags</td>

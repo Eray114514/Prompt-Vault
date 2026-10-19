@@ -1,5 +1,6 @@
 import {
   PROMPT_LIMITS,
+  hasForbiddenModelChars,
   isValidCategory,
   VALID_CATEGORIES,
   type Category,
@@ -34,6 +35,44 @@ function parseTags(value: unknown): ParseResult<string[]> {
     return { ok: false, error: `标签数量不能超过 ${PROMPT_LIMITS.tagCount} 个` };
   }
   return { ok: true, data: cleaned };
+}
+
+/**
+ * 模型名的校验与归一。
+ *
+ * 归一的目标不是"猜用户想写什么"，而是保证这个值能安全地进 PostgREST 过滤条件：
+ * 去掉结构字符和 LIKE 通配符，折叠空白，长度封顶。空字符串是合法值，表示未标注模型。
+ */
+export function normalizeModelName(value: unknown): ParseResult<string> {
+  if (value === undefined || value === null) return { ok: true, data: "" };
+  if (typeof value !== "string") {
+    return { ok: false, error: "model 必须是字符串" };
+  }
+
+  const model = value.replace(/\s+/g, " ").trim();
+  if (!model) return { ok: true, data: "" };
+  if (model.length > PROMPT_LIMITS.model) {
+    return { ok: false, error: `模型名不能超过 ${PROMPT_LIMITS.model} 个字符` };
+  }
+  if (hasForbiddenModelChars(model)) {
+    return {
+      ok: false,
+      error: `模型名不能包含 , ( ) { } " \\ % * 或控制字符`,
+    };
+  }
+  return { ok: true, data: model };
+}
+
+/**
+ * 输入框里的宽松版归一：把结构字符直接抹掉、压到长度上限，而不是报错。
+ * 服务端仍然用 normalizeModelName 严格校验 —— 这里只是让手动输入更顺，
+ * 不承担"信任边界"的职责。
+ */
+export function sanitizeModelDraft(raw: string): string {
+  return raw
+    .replace(/["\\,(){}%*]/g, "")
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .slice(0, PROMPT_LIMITS.model);
 }
 
 function parseTextField(
@@ -92,6 +131,9 @@ export function parseNewPrompt(body: unknown): ParseResult<NewPrompt> {
   const tags = parseTags(source.tags);
   if (!tags.ok) return tags;
 
+  const model = normalizeModelName(source.model);
+  if (!model.ok) return model;
+
   return {
     ok: true,
     data: {
@@ -99,6 +141,7 @@ export function parseNewPrompt(body: unknown): ParseResult<NewPrompt> {
       content: content.data,
       notes: notes.data,
       category: source.category as Category,
+      model: model.data,
       tags: tags.data,
     },
   };
@@ -137,6 +180,62 @@ export function aggregateTags(prompts: Prompt[]): TagCount[] {
   return Array.from(counts, ([tag, count]) => ({ tag, count })).sort(
     (a, b) => b.count - a.count || a.tag.localeCompare(b.tag, "zh")
   );
+}
+
+export interface ModelCount {
+  /** 首次出现时的原写法。展示用它，匹配一律大小写不敏感。 */
+  model: string;
+  count: number;
+  /** 这个模型出现在哪些分类里 —— 给 API 文档用，方便 agent 知道该查哪个 category。 */
+  categories: Category[];
+}
+
+/**
+ * 聚合模型及使用次数。
+ *
+ * 与标签不同的两点：
+ * - 空字符串（未标注）不参与聚合 —— "不限模型"不是一个模型，列出来只会污染清单。
+ * - 大小写不敏感地合并（`Midjourney` / `midjourney` 算同一个），显示保留首次出现的写法。
+ *   模型名是 agent 和手输共用的自由文本，只差大小写的两个变体是最常见的脏数据。
+ */
+export function aggregateModels(
+  list: Array<Pick<Prompt, "model" | "category">>
+): ModelCount[] {
+  const byKey = new Map<string, { model: string; count: number; categories: Set<Category> }>();
+
+  for (const prompt of list) {
+    const model = (prompt.model ?? "").trim();
+    if (!model) continue;
+    const key = model.toLowerCase();
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.count += 1;
+      existing.categories.add(prompt.category);
+    } else {
+      byKey.set(key, {
+        model,
+        count: 1,
+        categories: new Set<Category>([prompt.category]),
+      });
+    }
+  }
+
+  return Array.from(byKey.values())
+    .map((entry) => ({
+      model: entry.model,
+      count: entry.count,
+      categories: Array.from(entry.categories),
+    }))
+    .sort(
+      (a, b) => b.count - a.count || a.model.localeCompare(b.model, "zh")
+    );
+}
+
+/** 模型筛选：空筛选视为全部命中；否则大小写不敏感地精确相等。 */
+export function matchesModel(prompt: Pick<Prompt, "model">, model: string): boolean {
+  const target = model.trim().toLowerCase();
+  if (!target) return true;
+  return (prompt.model ?? "").trim().toLowerCase() === target;
 }
 
 /**

@@ -4,12 +4,14 @@ import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
 import { NAV_ITEMS, type FilterKey, type Category } from "@/lib/types";
 import { CATEGORY_COLORS } from "@/lib/types";
-import type { TagCount } from "@/lib/prompts";
+import type { ModelCount, TagCount } from "@/lib/prompts";
 import { logoutAction } from "@/lib/auth-actions";
 import { NavIcon, CodeIcon, LogOutIcon, CloseIcon } from "./Icons";
 
 /** 侧栏标签区默认只露这么多个，避免标签一多就把导航挤没。 */
 const TAG_PREVIEW_LIMIT = 12;
+/** 模型通常比标签少得多，但仍给一个上限，防止极端情况把侧栏撑长。 */
+const MODEL_PREVIEW_LIMIT = 8;
 
 interface SidebarProps {
   filter: FilterKey;
@@ -20,6 +22,11 @@ interface SidebarProps {
   selectedTags: string[];
   onToggleTag: (tag: string) => void;
   onClearTags: () => void;
+  /** 全量聚合出来的模型及计数，已按计数降序。 */
+  modelCounts: ModelCount[];
+  selectedModel: string;
+  onToggleModel: (model: string) => void;
+  onClearModel: () => void;
   /** 移动端抽屉是否展开。lg 以上忽略此值，侧栏常驻。 */
   open: boolean;
   onClose: () => void;
@@ -52,17 +59,26 @@ export function Sidebar({
   selectedTags,
   onToggleTag,
   onClearTags,
+  modelCounts,
+  selectedModel,
+  onToggleModel,
+  onClearModel,
   open,
   onClose,
 }: SidebarProps) {
   const isDesktop = useIsDesktop();
   const [loggingOut, startLogout] = useTransition();
   const [tagsExpanded, setTagsExpanded] = useState(false);
+  const [modelsExpanded, setModelsExpanded] = useState(false);
   const hiddenOnMobile = !isDesktop && !open;
 
   const visibleTags = tagsExpanded
     ? tagCounts
     : tagCounts.slice(0, TAG_PREVIEW_LIMIT);
+
+  const visibleModels = modelsExpanded
+    ? modelCounts
+    : modelCounts.slice(0, MODEL_PREVIEW_LIMIT);
 
   const handleLogout = () => {
     startLogout(async () => {
@@ -186,6 +202,61 @@ export function Sidebar({
               </button>
             );
           })}
+
+          {modelCounts.length > 0 && (
+            <section className="mt-4 border-t border-border-subtle/60 pt-3">
+              <div className="mb-2 flex items-center justify-between px-1">
+                <h2 className="text-[11px] tracking-wider text-text-muted">模型</h2>
+                {selectedModel && (
+                  <button
+                    type="button"
+                    onClick={onClearModel}
+                    className="text-[11px] text-text-muted transition hover:text-text-primary"
+                  >
+                    清除
+                  </button>
+                )}
+              </div>
+
+              <div className="flex flex-wrap gap-1.5 px-1">
+                {visibleModels.map(({ model, count }) => {
+                  const active =
+                    selectedModel.trim().toLowerCase() === model.toLowerCase();
+                  return (
+                    <button
+                      key={model}
+                      type="button"
+                      onClick={() => onToggleModel(model)}
+                      aria-pressed={active}
+                      title={`按模型筛选：${model}`}
+                      className={`inline-flex max-w-full items-center gap-1 rounded-[5px] border px-1.5 py-0.5 font-mono text-[10px] transition ${
+                        active
+                          ? "border-accent/55 bg-accent/15 text-text-primary"
+                          : "border-white/10 bg-white/[0.04] text-text-muted hover:border-white/25 hover:text-text-secondary"
+                      }`}
+                    >
+                      <span aria-hidden="true" className="text-[8px] text-accent/70">
+                        ◇
+                      </span>
+                      <span className="truncate">{model}</span>
+                      <span className="tabular-nums opacity-60">{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {modelCounts.length > MODEL_PREVIEW_LIMIT && (
+                <button
+                  type="button"
+                  onClick={() => setModelsExpanded((prev) => !prev)}
+                  aria-expanded={modelsExpanded}
+                  className="mt-2 px-1 text-[11px] text-text-muted transition hover:text-text-secondary"
+                >
+                  {modelsExpanded ? "收起" : `显示全部 (${modelCounts.length})`}
+                </button>
+              )}
+            </section>
+          )}
 
           {tagCounts.length > 0 && (
             <section className="mt-4 border-t border-border-subtle/60 pt-3">

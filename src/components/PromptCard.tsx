@@ -14,7 +14,11 @@ interface PromptCardProps {
   onToggleFavorite: (id: string, current: boolean) => void;
   /** 点击卡片上的标签 chip 直接筛选 —— 否则标签只能靠手打搜索词命中 */
   onTagClick: (tag: string) => void;
+  /** 模型 chip 同样可点：模型是比标签更强的"适用面"约束 */
+  onModelClick: (model: string) => void;
   activeTags: string[];
+  /** 当前生效的模型筛选（空串 = 未筛选） */
+  activeModel: string;
   index?: number;
 }
 
@@ -25,7 +29,9 @@ export function PromptCard({
   onDelete,
   onToggleFavorite,
   onTagClick,
+  onModelClick,
   activeTags,
+  activeModel,
   index = 0,
 }: PromptCardProps) {
   const [copied, setCopied] = useState(false);
@@ -113,7 +119,7 @@ export function PromptCard({
         </button>
       </div>
 
-      {/* 分类 & 标签 */}
+      {/* 分类 & 模型 & 标签 */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <span
           className="rounded-full border px-2.5 py-0.5 text-[11px] font-medium tracking-wider"
@@ -125,6 +131,31 @@ export function PromptCard({
         >
           {CATEGORY_LABELS[prompt.category]}
         </span>
+        {/**
+         * 模型铭牌：排在其他标签最前面，但不抢分类的霓虹色 ——
+         * 模型名跨品牌，给它上任何一家品牌的颜色都会误导。改用中性银灰 + 菱形前缀，
+         * 靠"形状"而不是"颜色"把它和自由标签区分开。
+         */}
+        {prompt.model?.trim() && (
+          <button
+            type="button"
+            onClick={() => onModelClick(prompt.model)}
+            aria-pressed={
+              activeModel.toLowerCase() === prompt.model.trim().toLowerCase()
+            }
+            title={`按模型筛选：${prompt.model}`}
+            className={`inline-flex max-w-[11rem] items-center gap-1 rounded-[5px] border px-1.5 py-0.5 font-mono text-[10px] tracking-[0.04em] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] transition ${
+              activeModel.toLowerCase() === prompt.model.trim().toLowerCase()
+                ? "border-accent/55 bg-accent/15 text-text-primary"
+                : "border-white/15 bg-white/[0.055] text-text-primary/90 hover:border-white/30 hover:bg-white/10"
+            }`}
+          >
+            <span aria-hidden="true" className="text-[8px] text-accent/85">
+              ◇
+            </span>
+            <span className="truncate">{prompt.model}</span>
+          </button>
+        )}
         {prompt.tags.slice(0, 4).map((tag) => {
           const active = activeTags.includes(tag);
           return (

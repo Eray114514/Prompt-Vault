@@ -89,6 +89,9 @@ function toMarkdown(prompts: Prompt[], includeNotes: boolean): string {
   for (const prompt of prompts) {
     lines.push(`## ${prompt.title}`, "");
     lines.push(`- 分类：\`${prompt.category}\`${prompt.is_favorite ? "（收藏）" : ""}`);
+    if (prompt.model?.trim()) {
+      lines.push(`- 模型：\`${prompt.model.trim()}\``);
+    }
     if (prompt.tags.length > 0) {
       lines.push(`- 标签：${prompt.tags.map((tag) => `\`${tag}\``).join(" ")}`);
     }

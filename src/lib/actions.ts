@@ -2,7 +2,7 @@
 
 import { unstable_noStore as noStore } from "next/cache";
 import { supabase } from "./supabase";
-import { parseNewPrompt } from "./prompts";
+import { aggregateModels, parseNewPrompt, type ModelCount } from "./prompts";
 import { requireSession } from "./session";
 import type { ActionResult, NewPrompt, Prompt } from "./types";
 
@@ -41,6 +41,38 @@ export async function getPrompts(): Promise<Prompt[]> {
   }
 
   return all;
+}
+
+/**
+ * 只取 model + category 两列的聚合，供 API 文档页展示"本库已有模型"。
+ *
+ * 文档页把这份清单直接写进给 agent 的指令包里，agent 因此不需要先调接口
+ * 才能知道有哪些模型名可用 —— 少一次往返，也少一次"模型名猜错"的机会。
+ */
+export async function getModelCatalog(): Promise<ModelCount[]> {
+  noStore();
+
+  const rows: Array<Pick<Prompt, "model" | "category">> = [];
+
+  for (let page = 0; page < PROMPTS_MAX_PAGES; page += 1) {
+    const offset = page * PROMPTS_PAGE_SIZE;
+    const { data, error } = await supabase
+      .from("prompts")
+      .select("model,category")
+      // 分页必须有确定性排序，否则 offset 翻页会重复或漏行。
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(offset, offset + PROMPTS_PAGE_SIZE - 1)
+      .returns<Array<Pick<Prompt, "model" | "category">>>();
+
+    if (error) throw new Error(error.message);
+
+    const pageRows = data ?? [];
+    rows.push(...pageRows);
+    if (pageRows.length < PROMPTS_PAGE_SIZE) break;
+  }
+
+  return aggregateModels(rows);
 }
 
 export async function createPrompt(input: unknown): Promise<ActionResult<Prompt>> {

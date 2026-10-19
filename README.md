@@ -34,12 +34,14 @@
   - 💬 LLM Chat (`llm_chat`)
 - **CRUD Operations** — Create, read, update, and delete prompts.
 - **Notes & Tags** — Add usage notes and free-form tags to each prompt.
+- **Model Nameplate** — Each prompt can carry one model name (Midjourney, GPT-4o, Nano Banana …). It renders as a silver plaque in front of the other tags, is filterable from the sidebar, and is a first-class API field. Same category ≠ same model.
 - **One-Click Copy** — Copy prompt content to your clipboard instantly.
 - **Undo-able Deletion** — Deletes commit after a short grace window, with an inline Undo action.
 - **Clipboard Detection** — Detects prompt-like clipboard text and offers to save it.
 - **Full-Text Search** — Search across titles, content, notes, and tags.
 - **Favorites Filter** — Pin the prompts you reach for most.
 - **Open Read API** — `GET /api/prompts` needs no key at all, so any cloud agent anywhere can pull your prompts in one request.
+- **Model-aware Retrieval** — Pass `model=` to `GET /api/prompts` and the response prioritizes that model, fills the remaining budget with other models (favorites first, flagged `model_match: false`), and returns a titles-only `catalog` of everything that exists but was not returned. The API docs inline the library's current model list, so an agent never has to enumerate it first.
 - **Tag Index API** — `GET /api/tags` returns `{tag, count}` only, so an agent can reuse existing tags instead of pulling the whole library just to enumerate them.
 - **Locked Write API** — `POST /api/prompts` always requires a bearer secret.
 - **Not Indexable** — `robots.txt`, `X-Robots-Tag` and page metadata all opt out of search engines.
@@ -186,6 +188,7 @@ create table prompts (
   content text not null,
   notes text not null default '',
   category text not null check (category in ('image_generation', 'image_editing', 'video_generation', 'llm_chat')),
+  model text not null default '',
   tags text[] not null default '{}',
   is_favorite boolean not null default false,
   created_at timestamptz not null default now(),
@@ -199,6 +202,15 @@ If you already created the table before notes were added, run:
 alter table prompts
 add column if not exists notes text not null default '';
 ```
+
+If you already created the table before model tags were added, run:
+
+```sql
+alter table prompts
+add column if not exists model text not null default '';
+```
+
+`model` is `''` for prompts that are not tied to a specific model. The API treats `''` as "unlabeled", never as a model name.
 
 ### Keep `updated_at` authoritative
 
@@ -327,11 +339,13 @@ npm start
 - 按四大分类管理提示词：图片生成、图片编辑、视频生成、AI 对话
 - 新建 / 编辑 / 删除提示词，删除带撤销窗口
 - 为提示词添加备注与标签
+- **模型铭牌**：每条提示词可标注一个模型（Midjourney / GPT-4o / Nano Banana …），显示在其他标签最前面；侧栏可按模型筛选。同分类 ≠ 同模型
 - 一键复制提示词内容
 - 剪贴板检测，自动提示添加
-- 全文搜索（标题、内容、备注、标签）
+- 全文搜索（标题、内容、备注、模型、标签）
 - 收藏筛选
 - **开放读取接口**：`GET /api/prompts` 无需任何密钥，云端 agent 随时随地可直接取用
+- **按模型取用**：`GET /api/prompts?model=xxx` 优先返回该模型的提示词，不足上限时用其他模型补位（收藏优先，逐条标记 `model_match: false`），并把没返回正文的条目列进只含标题的 `catalog`；API 文档里直接内联当前模型清单
 - **标签索引接口**：`GET /api/tags` 只回 `{tag, count}`，agent 写之前能查重，不必为了数标签拉全库
 - **写入需要密钥**：`POST /api/prompts` 必须携带 Bearer 密钥
 - **整库导出**：`GET /api/export`（必须鉴权）用于备份，支持 JSON / Markdown

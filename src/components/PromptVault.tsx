@@ -10,7 +10,13 @@ import {
   deletePrompt,
   toggleFavorite,
 } from "@/lib/actions";
-import { aggregateTags, matchesTags, sortByCreatedDesc } from "@/lib/prompts";
+import {
+  aggregateModels,
+  aggregateTags,
+  matchesModel,
+  matchesTags,
+  sortByCreatedDesc,
+} from "@/lib/prompts";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { PromptCard } from "./PromptCard";
@@ -28,7 +34,7 @@ const UNDO_WINDOW_MS = 6000;
 const REFRESH_THROTTLE_MS = 15000;
 const TOAST_DURATION_MS = 2600;
 
-/** 搜索：标题 / 正文 / 备注 / 标签之间的 OR 子串匹配。空查询视为命中。 */
+/** 搜索：标题 / 正文 / 备注 / 模型 / 标签之间的 OR 子串匹配。空查询视为命中。 */
 function matchesSearch(prompt: Prompt, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
@@ -36,6 +42,7 @@ function matchesSearch(prompt: Prompt, query: string): boolean {
     prompt.title.toLowerCase().includes(q) ||
     prompt.content.toLowerCase().includes(q) ||
     (prompt.notes ?? "").toLowerCase().includes(q) ||
+    (prompt.model ?? "").toLowerCase().includes(q) ||
     prompt.tags.some((tag) => tag.toLowerCase().includes(q))
   );
 }
@@ -73,6 +80,8 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
   // 标签是单选分类之外的正交、多选筛选轴，刻意不塞进 FilterKey ——
   // 那是单值枚举，Sidebar 的 isCategory 与 Modal 的 defaultCategory 都依赖它保持单值语义。
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  // 模型是单值筛选轴：一条提示词只属于一个模型，"同时符合两个模型"没有意义。
+  const [selectedModel, setSelectedModel] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const [editingPrompt, setEditingPrompt] = useState<Prompt | null>(null);
   const [prefillContent, setPrefillContent] = useState<string>("");
@@ -206,10 +215,11 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
       prompts.filter(
         (p) =>
           matchesCategoryFilter(p, filter) &&
+          matchesModel(p, selectedModel) &&
           matchesTags(p, selectedTags) &&
           matchesSearch(p, search)
       ),
-    [prompts, filter, selectedTags, search]
+    [prompts, filter, selectedModel, selectedTags, search]
   );
 
   const counts = useMemo(() => {
@@ -231,6 +241,12 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
     [tagCounts]
   );
 
+  const modelCounts = useMemo(() => aggregateModels(prompts), [prompts]);
+  const modelSuggestions = useMemo(
+    () => modelCounts.map((entry) => entry.model),
+    [modelCounts]
+  );
+
   const filterLabel = useMemo(() => {
     if (filter === "all") return "全部";
     if (filter === "favorites") return "收藏";
@@ -239,10 +255,16 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
 
   /** 在给定的放宽条件下有多少命中。用于空结果时给可点的出口。 */
   const countMatching = useCallback(
-    (next: { search: string; filter: FilterKey; tags: string[] }) =>
+    (next: {
+      search: string;
+      filter: FilterKey;
+      tags: string[];
+      model: string;
+    }) =>
       prompts.filter(
         (p) =>
           matchesCategoryFilter(p, next.filter) &&
+          matchesModel(p, next.model) &&
           matchesTags(p, next.tags) &&
           matchesSearch(p, next.search)
       ).length,
@@ -259,10 +281,34 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
     const hasSearch = search.trim().length > 0;
     const hasCategory = filter !== "all";
     const hasTags = selectedTags.length > 0;
+    const hasModel = selectedModel.length > 0;
     const options: ReliefOption[] = [];
 
+    // 模型筛选最"硬"（它直接决定提示词能不能用在目标模型上），所以优先给出出口。
+    if (hasModel) {
+      const count = countMatching({
+        search,
+        filter,
+        tags: selectedTags,
+        model: "",
+      });
+      if (count > 0) {
+        options.push({
+          key: "drop-model",
+          label: `清除模型筛选「${selectedModel}」`,
+          count,
+          apply: () => setSelectedModel(""),
+        });
+      }
+    }
+
     if (hasTags) {
-      const count = countMatching({ search, filter, tags: [] });
+      const count = countMatching({
+        search,
+        filter,
+        tags: [],
+        model: selectedModel,
+      });
       if (count > 0) {
         options.push({
           key: "drop-tags",
@@ -273,11 +319,12 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
       }
     }
 
-    if (hasCategory && (hasSearch || hasTags)) {
+    if (hasCategory && (hasSearch || hasTags || hasModel)) {
       const count = countMatching({
         search,
         filter: "all",
         tags: selectedTags,
+        model: selectedModel,
       });
       if (count > 0) {
         options.push({
@@ -290,7 +337,12 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
     }
 
     if (hasSearch) {
-      const count = countMatching({ search: "", filter, tags: selectedTags });
+      const count = countMatching({
+        search: "",
+        filter,
+        tags: selectedTags,
+        model: selectedModel,
+      });
       if (count > 0) {
         options.push({
           key: "drop-search",
@@ -301,7 +353,7 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
       }
     }
 
-    if (hasCategory || hasSearch || hasTags) {
+    if (hasCategory || hasSearch || hasTags || hasModel) {
       options.push({
         key: "reset",
         label: "查看全部档案",
@@ -310,6 +362,7 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
           setSearch("");
           setFilter("all");
           setSelectedTags([]);
+          setSelectedModel("");
         },
       });
     }
@@ -320,6 +373,7 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
     filteredPrompts.length,
     filter,
     search,
+    selectedModel,
     selectedTags,
     filterLabel,
     countMatching,
@@ -332,6 +386,15 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
   }, []);
 
   const clearTags = useCallback(() => setSelectedTags([]), []);
+
+  /** 再点一次当前模型即取消筛选 —— 与标签 chip 的交互保持一致。 */
+  const toggleModel = useCallback((model: string) => {
+    setSelectedModel((prev) =>
+      prev.trim().toLowerCase() === model.trim().toLowerCase() ? "" : model
+    );
+  }, []);
+
+  const clearModel = useCallback(() => setSelectedModel(""), []);
 
   const handleCreate = useCallback(
     async (data: NewPrompt) => {
@@ -533,6 +596,10 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
         selectedTags={selectedTags}
         onToggleTag={toggleTag}
         onClearTags={clearTags}
+        modelCounts={modelCounts}
+        selectedModel={selectedModel}
+        onToggleModel={toggleModel}
+        onClearModel={clearModel}
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
       />
@@ -565,7 +632,9 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
                   onDelete={handleDelete}
                   onToggleFavorite={handleToggleFavorite}
                   onTagClick={toggleTag}
+                  onModelClick={toggleModel}
                   activeTags={selectedTags}
+                  activeModel={selectedModel}
                 />
               ))}
             </div>
@@ -582,6 +651,8 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
           initialTags={selectedTags}
           prefillContent={prefillContent}
           tagSuggestions={tagSuggestions}
+          defaultModel={selectedModel || undefined}
+          modelSuggestions={modelSuggestions}
           onSubmit={handleSubmit}
           onClose={() => {
             setModalOpen(false);

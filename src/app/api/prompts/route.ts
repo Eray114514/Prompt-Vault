@@ -5,8 +5,9 @@ import { NextRequest } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { secretMatches } from "@/lib/api-auth";
 import { baseHeaders, jsonResponse } from "@/lib/api-response";
-import { parseNewPrompt } from "@/lib/prompts";
+import { normalizeModelName, parseNewPrompt } from "@/lib/prompts";
 import {
+  MAX_CATALOG_RETURNED,
   MAX_FAVORITES_RETURNED,
   MAX_TAG_FILTER,
   PROMPT_LIMITS,
@@ -52,6 +53,7 @@ function buildOrFilter(raw: string): string | null {
     `title.ilike.${like}`,
     `content.ilike.${like}`,
     `notes.ilike.${like}`,
+    `model.ilike.${like}`,
     `tags.cs.${contains}`,
   ].join(",");
 }
@@ -60,10 +62,22 @@ type ApiPromptRow = {
   title: string;
   content: string;
   notes: string;
-  category?: string;
+  model: string;
+  category: string;
   tags: string[];
   is_favorite: boolean;
 };
+
+/** 目录条目：只带"有没有、是什么"，不带正文。agent 据此决定要不要精确回查。 */
+type CatalogEntry = {
+  title: string;
+  model: string;
+  category: string;
+  is_favorite: boolean;
+};
+
+/** 查询范围：不限模型 / 仅目标模型 / 排除目标模型。 */
+type ModelScope = "all" | "match" | "other";
 
 export async function OPTIONS() {
   return new Response(null, { status: 204, headers: baseHeaders() });
@@ -104,61 +118,225 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const includeCategory = rawCategories.length > 1;
-  // 显式标注为 string，让 supabase 的类型层走通用分支，行类型交给下面的
-  // .returns<ApiPromptRow[]>() 决定。否则 select() 在编译期的 SQL 解析器
-  // 会在两个字符串字面量的联合类型上翻车（ParserError）。
-  const selectColumns: string = includeCategory
-    ? "title,content,notes,category,tags,is_favorite"
-    : "title,content,notes,tags,is_favorite";
+  /**
+   * 模型过滤。空值等于没传；非法字符直接 400 —— 这个值会被带进 PostgREST
+   * 的过滤条件（`model=ilike.<值>`），结构字符必须在入口就挡掉。
+   * 未知但合法的模型名不报错，走"0 命中 + availableModels"的路径。
+   */
+  const rawModel = (searchParams.get("model") ?? "").trim();
+  let requestedModel = "";
+  if (rawModel) {
+    const parsedModel = normalizeModelName(rawModel);
+    if (!parsedModel.ok) {
+      return jsonResponse(
+        { error: `Invalid model: ${parsedModel.error}` },
+        400
+      );
+    }
+    requestedModel = parsedModel.data;
+  }
+
+  // category 现在始终返回：指定模型后一次可能跨多个分类，
+  // agent 需要知道每条提示词属于哪一类才能决定怎么用。
+  const selectColumns: string =
+    "title,content,notes,model,category,tags,is_favorite";
 
   const orFilter = q ? buildOrFilter(q) : null;
 
-  const buildQuery = (favorite: boolean) => {
-    const base = supabase
+  const buildQuery = (favorite: boolean | null, scope: ModelScope = "all") => {
+    let query = supabase
       .from("prompts")
-      .select(selectColumns)
-      .eq("is_favorite", favorite)
+      .select(selectColumns, { count: "exact" })
       .in("category", categories);
+
+    if (favorite !== null) query = query.eq("is_favorite", favorite);
 
     // 标签过滤用 .contains()（生成 tags=cs.{a,b}）而不是手拼 or 字符串：
     // 转义交给 supabase-js，而且它与下面 q 的 or 组在顶层天然 AND、互不干扰。
-    const scoped =
-      selectedTags.length > 0 ? base.contains("tags", selectedTags) : base;
-    const filtered = orFilter ? scoped.or(orFilter) : scoped;
-    return filtered
+    if (selectedTags.length > 0) query = query.contains("tags", selectedTags);
+    if (scope === "match") query = query.ilike("model", requestedModel);
+    if (scope === "other") query = query.not("model", "ilike", requestedModel);
+    if (orFilter) query = query.or(orFilter);
+
+    return query
       .order("updated_at", { ascending: false })
+      // 确定性次序：updated_at 可能并列，offset 翻页必须再挂一个唯一列。
+      .order("id", { ascending: true })
       .returns<ApiPromptRow[]>();
   };
 
-  // 分页下推到 SQL。
-  // 旧实现是把整个分类拉进 Edge 函数再 slice —— 而 PostgREST 单次最多返回 1000 行，
-  // 超限是静默截断，于是"翻页"和"搜索"都会在数据变多后悄悄漏结果且不报错。
-  const [favoritesResult, nonFavoritesResult] = await Promise.all([
-    buildQuery(true).range(0, MAX_FAVORITES_RETURNED - 1),
-    buildQuery(false).range(0, limit - 1),
-  ]);
+  /**
+   * 扫描当前筛选范围内的模型清单。只在目标模型 0 命中时调用 ——
+   * 目的是让 agent 猜错模型名时能立刻看到正确写法，而不是只拿到一个空数组。
+   */
+  const collectAvailableModels = async (): Promise<
+    Array<{ model: string; count: number }>
+  > => {
+    const counts = new Map<string, { model: string; count: number }>();
 
-  const errorMessage =
-    favoritesResult.error?.message ?? nonFavoritesResult.error?.message;
-  if (errorMessage) {
-    return jsonResponse({ error: errorMessage }, 500);
+    for (let page = 0; page < 50; page += 1) {
+      const offset = page * 1000;
+      const { data, error } = await buildQuery(null).range(offset, offset + 999);
+      if (error) break;
+
+      const rows = data ?? [];
+      for (const row of rows) {
+        const model = (row.model ?? "").trim();
+        if (!model) continue;
+        const key = model.toLowerCase();
+        const existing = counts.get(key);
+        if (existing) existing.count += 1;
+        else counts.set(key, { model, count: 1 });
+      }
+      if (rows.length < 1000) break;
+    }
+
+    return Array.from(counts.values())
+      .sort((a, b) => b.count - a.count || a.model.localeCompare(b.model, "en"))
+      .slice(0, 30);
+  };
+
+  // ── 未指定模型：保持原有姿态（收藏最多 200 条 + 非收藏 limit 条） ──
+  if (!requestedModel) {
+    // 分页下推到 SQL。
+    // 旧实现是把整个分类拉进 Edge 函数再 slice —— 而 PostgREST 单次最多返回 1000 行，
+    // 超限是静默截断，于是"翻页"和"搜索"都会在数据变多后悄悄漏结果且不报错。
+    const [favoritesResult, nonFavoritesResult] = await Promise.all([
+      buildQuery(true).range(0, MAX_FAVORITES_RETURNED - 1),
+      buildQuery(false).range(0, limit - 1),
+    ]);
+
+    const errorMessage =
+      favoritesResult.error?.message ?? nonFavoritesResult.error?.message;
+    if (errorMessage) {
+      return jsonResponse({ error: errorMessage }, 500);
+    }
+
+    const favorites = favoritesResult.data ?? [];
+    const nonFavorites = nonFavoritesResult.data ?? [];
+
+    return jsonResponse(
+      {
+        data: [...favorites, ...nonFavorites],
+        meta: {
+          favoritesReturned: favorites.length,
+          nonFavoritesReturned: nonFavorites.length,
+          nonFavoritesLimit: limit,
+          favoritesLimit: MAX_FAVORITES_RETURNED,
+          categories,
+          q: q || null,
+          tags: selectedTags,
+          model: null,
+        },
+      },
+      200,
+      30
+    );
   }
 
-  const favorites = favoritesResult.data ?? [];
-  const nonFavorites = nonFavoritesResult.data ?? [];
+  // ── 指定模型：limit 变成总预算，先给目标模型，再用其他模型补足 ──
+  //
+  // 目标模型的条目按"收藏 → 非收藏"取，超过预算的部分进 catalog；
+  // 余量不足时用其他模型补，同样收藏优先，并逐条标记 model_match=false，
+  // 让 agent 明确知道"这条不是给这个模型用的"。
+  const fetchWindow = limit + MAX_CATALOG_RETURNED;
+
+  const [matchFavoritesResult, matchNonFavoritesResult] = await Promise.all([
+    buildQuery(true, "match").range(0, fetchWindow - 1),
+    buildQuery(false, "match").range(0, fetchWindow - 1),
+  ]);
+
+  const matchError =
+    matchFavoritesResult.error?.message ?? matchNonFavoritesResult.error?.message;
+  if (matchError) {
+    return jsonResponse({ error: matchError }, 500);
+  }
+
+  const matchedAll = [
+    ...(matchFavoritesResult.data ?? []),
+    ...(matchNonFavoritesResult.data ?? []),
+  ];
+  const matchedTotal =
+    (matchFavoritesResult.count ?? 0) + (matchNonFavoritesResult.count ?? 0);
+
+  const dataMatched = matchedAll.slice(0, limit);
+  const remaining = Math.max(limit - dataMatched.length, 0);
+
+  const [otherFavoritesResult, otherNonFavoritesResult] = await Promise.all([
+    buildQuery(true, "other").range(
+      0,
+      remaining + MAX_CATALOG_RETURNED - 1
+    ),
+    buildQuery(false, "other").range(
+      0,
+      remaining + MAX_CATALOG_RETURNED - 1
+    ),
+  ]);
+
+  const otherError =
+    otherFavoritesResult.error?.message ?? otherNonFavoritesResult.error?.message;
+  if (otherError) {
+    return jsonResponse({ error: otherError }, 500);
+  }
+
+  const otherAll = [
+    ...(otherFavoritesResult.data ?? []),
+    ...(otherNonFavoritesResult.data ?? []),
+  ];
+  const dataFill = otherAll.slice(0, remaining);
+  const otherTotal =
+    (otherFavoritesResult.count ?? 0) + (otherNonFavoritesResult.count ?? 0);
+
+  const data = [
+    ...dataMatched.map((row) => ({ ...row, model_match: true })),
+    ...dataFill.map((row) => ({ ...row, model_match: false })),
+  ];
+
+  // 目录：目标模型的溢出优先，其次才是其他模型的溢出。
+  // 只给标题/模型/分类/收藏状态 —— 足够 agent 判断"值不值得回查"，又不至于变成第二次全量。
+  const catalogPool = [
+    ...matchedAll.slice(dataMatched.length),
+    ...otherAll.slice(dataFill.length),
+  ];
+  const catalog: CatalogEntry[] = catalogPool
+    .slice(0, MAX_CATALOG_RETURNED)
+    .map((row) => ({
+      title: row.title,
+      model: row.model,
+      category: row.category,
+      is_favorite: row.is_favorite,
+    }));
+
+  const availableModels =
+    matchedTotal === 0 ? await collectAvailableModels() : null;
+  const totalInScope = matchedTotal + otherTotal;
 
   return jsonResponse(
     {
-      data: [...favorites, ...nonFavorites],
+      data,
+      catalog,
       meta: {
-        favoritesReturned: favorites.length,
-        nonFavoritesReturned: nonFavorites.length,
-        nonFavoritesLimit: limit,
-        favoritesLimit: MAX_FAVORITES_RETURNED,
         categories,
         q: q || null,
         tags: selectedTags,
+        /** 本次请求指定的模型（大小写按库里的写法无关，匹配不区分大小写）。 */
+        model: requestedModel,
+        /** 指定模型时，limit 是本次返回的**总条数预算**（含收藏）。 */
+        limit,
+        returned: data.length,
+        favoritesReturned: data.filter((row) => row.is_favorite).length,
+        nonFavoritesReturned: data.filter((row) => !row.is_favorite).length,
+        /** 目标模型：本次给了几条，库里一共有几条。 */
+        modelMatched: { returned: dataMatched.length, total: matchedTotal },
+        /** 为了补足预算而混入的其他模型条数（这些条目的 model_match 为 false）。 */
+        otherModelsReturned: dataFill.length,
+        catalogReturned: catalog.length,
+        catalogLimit: MAX_CATALOG_RETURNED,
+        /** true 表示目录被截断：还有更多提示词没列出名字，可缩窄 category/tag 再查。 */
+        catalogTruncated: totalInScope > data.length + catalog.length,
+        totalInScope,
+        /** 仅当目标模型 0 命中时出现：当前范围内实际存在的模型名，供改查。 */
+        ...(availableModels ? { availableModels } : {}),
       },
     },
     200,

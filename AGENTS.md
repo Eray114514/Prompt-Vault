@@ -39,7 +39,7 @@ src/
     error.tsx           ← 错误边界（客户端组件）
     loading.tsx         ← 加载骨架
     robots.ts           ← 全站 Disallow
-    api/prompts/route.ts  ← REST API (GET public, POST bearer-only; Edge runtime)
+    api/prompts/route.ts  ← REST API (GET public incl. ?model= mode, POST bearer-only; Edge runtime)
     api/tags/route.ts     ← 标签总览 {tag,count}（public read-only，给 agent 写前查重用）
     api/export/route.ts   ← 整库导出（bearer）
     api-docs/page.tsx   ← Self-hosted API documentation page
@@ -52,7 +52,7 @@ src/
     api-response.ts      ← 公开 JSON 端点共用的响应头 / jsonResponse（noindex + CORS）
     session.ts          ← getSession / requireSession（写操作守卫）
     auth-actions.ts     ← 登录 / 登出 Server Actions
-    prompts.ts          ← 输入校验（parseNewPrompt）+ 排序，UI 与 API 共用
+    prompts.ts          ← 输入校验（parseNewPrompt / 模型名归一）+ 标签/模型聚合 + 排序，UI 与 API 共用
     actions.ts          ← CRUD Server Actions ("use server")
     supabase.ts         ← Supabase client singleton, server-side only
     types.ts            ← Prompt types, category constants, color map, limits
@@ -86,7 +86,7 @@ Key constraints when touching auth:
 ### Two data paths — don't mix them up
 
 - **Server Actions** (`src/lib/actions.ts`): called by React client components. All web UI mutations go through here. Every one calls `requireSession()`.
-- **REST API** (`src/app/api/prompts/route.ts`): external integrations. GET returns favorites first (capped at `MAX_FAVORITES_RETURNED`), then non-favorites paginated (default limit 10, max 100).
+- **REST API** (`src/app/api/prompts/route.ts`): external integrations. GET returns favorites first (capped at `MAX_FAVORITES_RETURNED`), then non-favorites paginated (default limit 10, max 100). When `?model=` is present, `limit` becomes a total budget instead: model matches first, then other-model fill (favorites first, each carrying `model_match: false`), plus a titles-only `catalog` for everything not returned.
 
 **Server Actions return `ActionResult<T>`, they do not throw.** Next.js replaces thrown Server Action error messages with a generic string in production builds, so a returned `{ ok: false, error }` is the only reliable way to surface a message in the UI. `requireSession()` signals auth failure with `redirect("/login")` — redirects are implemented as thrown errors marked `NEXT_REDIRECT`, so client callers must swallow those (see `isRedirectError` in `PromptVault.tsx`).
 
@@ -94,6 +94,14 @@ Key constraints when touching auth:
 
 - **Paginate and search in SQL, never in memory.** PostgREST returns at most 1000 rows per request and truncates silently; slicing in the Edge function looks like it works right up until the data grows past that limit and results start disappearing without an error.
 - **Don't hand-escape values into `or=(...)`.** `sanitizeSearchTerm` strips the structural characters (`,`, `(`, `)`, `{`, `}`, `"`, `\`, `%`, `_`) rather than escaping them, then wraps the remainder in double quotes. Stripping beats nesting escapes — LIKE has its own backslash layer, and doubling the two together is where bugs live.
+- **`model` is a first-class column, not a tag.** It is single-valued, renders before the free-form tags, and is filtered in SQL via `ilike` (case-insensitive). `normalizeModelName` rejects `,(){}"\%*` at the write boundary and at the API query boundary — the value goes straight into a PostgREST filter, so structural characters must never reach it. `''` means "no model"; `aggregateModels` excludes it.
+- **Model-mode GET rejects nothing for unknown names.** A legal-but-unknown model returns `modelMatched.total: 0` plus `meta.availableModels` (aggregated from the same category/tag/q scope) so an agent can correct itself without a second call.
+
+The `model` column needs a one-time Supabase migration; without it every `select("*")` fails:
+
+```sql
+alter table prompts add column if not exists model text not null default '';
+```
 
 ### Page rendering
 
