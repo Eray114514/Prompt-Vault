@@ -64,6 +64,13 @@ src/
 | `POST /api/prompts` | `Authorization: Bearer <API_SECRET>`, always. If `API_SECRET` is unset the route returns **503**, never an unauthenticated write. |
 | `GET /api/export` | `Bearer <API_SECRET>` or `<CRON_SECRET>`. **503 when neither is configured.** Whole-library dump — never make it public. |
 
+**`/api-docs` deliberately hands the logged-in user the `API_SECRET` in cleartext.** The page reads it in the Server Component (after its own `requireSession()`), passes it to `ApiDocsClient` as a prop, and the "复制文档" payload embeds it so the pasted doc is immediately usable by an agent without a manual fill-in. This is an accepted trade-off, not a leak:
+
+- The page is session-gated twice (middleware **and** `requireSession()` in `api-docs/page.tsx`); unauthenticated visitors get a redirect before any secret is rendered.
+- The secret never reaches a public endpoint or a cache — `/api-docs` sends `Cache-Control: no-store` from `next.config.mjs`.
+- On screen the value stays masked (`•`), and every code sample uses the shell variable `$API_SECRET`; the cleartext only appears after clicking 显示 or 复制.
+- If you are tempted to "harden" this by removing the secret: that undoes the feature. Rotate `API_SECRET` on Vercel instead — the old value dies on redeploy.
+
 Key constraints when touching auth:
 
 - **`middleware.ts` has an explicit whitelist** (`api/prompts`, `api/export`, `login`, `robots.txt`, `_next/*`, icons). Adding a new API route means adding it there too — otherwise callers without a session cookie (cron, curl, cloud agents) get a 307 to `/login` and the handler never runs. Whitelisted routes are publicly *reachable*, so their own fail-closed 503/401 is the only thing protecting them. Never let the 503 degrade into "serve anyway".

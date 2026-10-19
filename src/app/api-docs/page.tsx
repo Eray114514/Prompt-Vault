@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { ApiDocsClient } from "@/components/ApiDocsClient";
+import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -18,12 +19,16 @@ function getBaseUrl() {
   return `${proto}://${host}`;
 }
 
-export default function ApiDocsPage() {
+export default async function ApiDocsPage() {
+  /**
+   * 这一页会把 API_SECRET 明文序列化给客户端，所以自己再验一次会话 ——
+   * 不能只依赖 middleware 的 matcher（改一次 matcher 就可能漏掉一条路径）。
+   * 未登录时 requireSession 直接 redirect("/login")，secret 不会被渲染。
+   */
+  await requireSession();
+
   const baseUrl = getBaseUrl();
-  return (
-    <ApiDocsClient
-      baseUrl={baseUrl}
-      writeEnabled={Boolean(process.env.API_SECRET)}
-    />
-  );
+  const apiSecret = (process.env.API_SECRET ?? "").trim() || null;
+
+  return <ApiDocsClient baseUrl={baseUrl} apiSecret={apiSecret} />;
 }

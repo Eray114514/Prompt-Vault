@@ -46,6 +46,18 @@ const nextConfig = {
   async headers() {
     return [
       {
+        // API 文档页会把 API_SECRET 明文下发到已登录的会话（用于"复制文档给 agent"），
+        // 所以显式禁掉一切缓存：浏览器历史、CDN、中间代理都不该留副本。
+        source: "/api-docs",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "no-store, no-cache, must-revalidate, private",
+          },
+          { key: "Pragma", value: "no-cache" },
+        ],
+      },
+      {
         source: "/:path*",
         headers: securityHeaders,
       },
