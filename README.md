@@ -35,6 +35,7 @@
 - **CRUD Operations** — Create, read, update, and delete prompts.
 - **Notes & Tags** — Add usage notes and free-form tags to each prompt.
 - **Model Nameplate** — Each prompt can carry one model name (Midjourney, GPT-4o, Nano Banana …). It renders as a silver plaque in front of the other tags, is filterable from the sidebar, and is a first-class API field. Same category ≠ same model.
+- **Bulk Editing** — Enter selection mode, click cards (or select all filtered results), then assign a model or set favorites for the whole batch in one request.
 - **One-Click Copy** — Copy prompt content to your clipboard instantly.
 - **Undo-able Deletion** — Deletes commit after a short grace window, with an inline Undo action.
 - **Clipboard Detection** — Detects prompt-like clipboard text and offers to save it.
@@ -340,6 +341,7 @@ npm start
 - 新建 / 编辑 / 删除提示词，删除带撤销窗口
 - 为提示词添加备注与标签
 - **模型铭牌**：每条提示词可标注一个模型（Midjourney / GPT-4o / Nano Banana …），显示在其他标签最前面；侧栏可按模型筛选。同分类 ≠ 同模型
+- **批量编辑**：进入批量选择后点选卡片或全选当前筛选结果，一次性设置模型或收藏
 - 一键复制提示词内容
 - 剪贴板检测，自动提示添加
 - 全文搜索（标题、内容、备注、模型、标签）

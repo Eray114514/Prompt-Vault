@@ -85,7 +85,7 @@ Key constraints when touching auth:
 
 ### Two data paths — don't mix them up
 
-- **Server Actions** (`src/lib/actions.ts`): called by React client components. All web UI mutations go through here. Every one calls `requireSession()`.
+- **Server Actions** (`src/lib/actions.ts`): called by React client components. All web UI mutations go through here. Every one calls `requireSession()`. Bulk edits use `bulkSetModel` / `bulkSetFavorite`, which validate and dedupe ids, then chunk the `UPDATE ... WHERE id IN (...)` at 100 ids per request — 2000 UUIDs in one PostgREST query string would blow past gateway URL limits. A mid-batch failure reports how many rows were already written, and the client re-fetches instead of trusting stale local state.
 - **REST API** (`src/app/api/prompts/route.ts`): external integrations. GET returns favorites first (capped at `MAX_FAVORITES_RETURNED`), then non-favorites paginated (default limit 10, max 100). When `?model=` is present, `limit` becomes a total budget instead: model matches first, then other-model fill (favorites first, each carrying `model_match: false`), plus a titles-only `catalog` for everything not returned.
 
 **Server Actions return `ActionResult<T>`, they do not throw.** Next.js replaces thrown Server Action error messages with a generic string in production builds, so a returned `{ ok: false, error }` is the only reliable way to surface a message in the UI. `requireSession()` signals auth failure with `redirect("/login")` — redirects are implemented as thrown errors marked `NEXT_REDIRECT`, so client callers must swallow those (see `isRedirectError` in `PromptVault.tsx`).

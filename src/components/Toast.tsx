@@ -17,6 +17,11 @@ export interface ToastMessage {
 interface ToastStackProps {
   messages: ToastMessage[];
   onDismiss: (id: number) => void;
+  /**
+   * 批量操作条占用底部时把提示抬起来 —— 失败时操作条不会消失，
+   * 两者同高会把提示盖在按钮上。
+   */
+  raised?: boolean;
 }
 
 /**
@@ -25,12 +30,18 @@ interface ToastStackProps {
  * 旧实现只存一条 message，连续操作时后一条会把前一条挤掉 —— 比如"删除 → 撤销"这套
  * 交互根本没机会把撤销按钮露出来。
  */
-export function ToastStack({ messages, onDismiss }: ToastStackProps) {
+export function ToastStack({
+  messages,
+  onDismiss,
+  raised = false,
+}: ToastStackProps) {
   if (messages.length === 0) return null;
 
   return (
     <div
-      className="pointer-events-none fixed inset-x-0 bottom-6 z-50 flex flex-col items-center gap-2 px-4"
+      className={`pointer-events-none fixed inset-x-0 z-50 flex flex-col items-center gap-2 px-4 ${
+        raised ? "bottom-32 sm:bottom-20" : "bottom-6"
+      }`}
       role="region"
       aria-label="操作提示"
     >

@@ -8,6 +8,8 @@ interface TopBarProps {
   onNew: () => void;
   onOpenSidebar: () => void;
   resultCount: number;
+  selectionMode: boolean;
+  onToggleSelectionMode: () => void;
 }
 
 export function TopBar({
@@ -16,6 +18,8 @@ export function TopBar({
   onNew,
   onOpenSidebar,
   resultCount,
+  selectionMode,
+  onToggleSelectionMode,
 }: TopBarProps) {
   return (
     <header className="flex items-center gap-3 px-4 py-4 sm:gap-5 sm:px-8 sm:py-5">
@@ -50,6 +54,22 @@ export function TopBar({
         >
           {resultCount} 条
         </span>
+        <button
+          type="button"
+          onClick={onToggleSelectionMode}
+          aria-pressed={selectionMode}
+          title={selectionMode ? "退出批量选择" : "批量选择"}
+          className={`btn h-10 rounded-lg border px-3 text-xs transition ${
+            selectionMode
+              ? "border-accent/55 bg-accent/15 text-text-primary"
+              : "border-border-subtle text-text-secondary hover:bg-bg-hover hover:text-text-primary"
+          }`}
+        >
+          <span className="hidden sm:inline">
+            {selectionMode ? "退出批量" : "批量选择"}
+          </span>
+          <span className="sm:hidden">{selectionMode ? "退出" : "批量"}</span>
+        </button>
         <button
           type="button"
           onClick={onNew}

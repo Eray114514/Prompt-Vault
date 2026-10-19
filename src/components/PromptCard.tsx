@@ -19,6 +19,10 @@ interface PromptCardProps {
   activeTags: string[];
   /** 当前生效的模型筛选（空串 = 未筛选） */
   activeModel: string;
+  /** 批量选择模式：整张卡片变成选择开关，卡片内的操作按钮暂时让位 */
+  selectionMode: boolean;
+  selected: boolean;
+  onToggleSelect: (id: string) => void;
   index?: number;
 }
 
@@ -32,6 +36,9 @@ export function PromptCard({
   onModelClick,
   activeTags,
   activeModel,
+  selectionMode,
+  selected,
+  onToggleSelect,
   index = 0,
 }: PromptCardProps) {
   const [copied, setCopied] = useState(false);
@@ -299,6 +306,38 @@ export function PromptCard({
           </button>
         </div>
       </div>
+
+      {/**
+       * 选择层盖住整张卡：批量场景下"点哪都能选"比"只有小方框能点"快得多。
+       * 代价是这一层存在时卡内的复制/编辑按钮暂时不可点 —— 选择模式下这是合理的，
+       * 想操作单条就退出批量。z-20 保证它盖住顶部色条与收藏星标。
+       */}
+      {selectionMode && (
+        <button
+          type="button"
+          onClick={() => onToggleSelect(prompt.id)}
+          aria-pressed={selected}
+          aria-label={
+            selected ? `取消选择「${prompt.title}」` : `选择「${prompt.title}」`
+          }
+          className={`absolute inset-0 z-20 rounded-xl border-2 transition-colors duration-150 ${
+            selected
+              ? "border-accent bg-accent/[0.07]"
+              : "border-transparent hover:border-white/15 hover:bg-white/[0.035]"
+          }`}
+        >
+          <span
+            aria-hidden="true"
+            className={`pointer-events-none absolute right-3 top-3 flex h-5 w-5 items-center justify-center rounded-full border text-[11px] font-bold transition ${
+              selected
+                ? "border-accent bg-accent text-white"
+                : "border-white/30 bg-bg-base/80 text-transparent"
+            }`}
+          >
+            ✓
+          </span>
+        </button>
+      )}
     </div>
   );
 }

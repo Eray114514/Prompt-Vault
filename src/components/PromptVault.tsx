@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import type { ActionResult, Prompt, NewPrompt, FilterKey } from "@/lib/types";
 import { CATEGORY_LABELS, NAV_ITEMS } from "@/lib/types";
 import {
+  bulkSetFavorite,
+  bulkSetModel,
   createPrompt,
   updatePrompt,
   deletePrompt,
@@ -21,6 +23,7 @@ import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { PromptCard } from "./PromptCard";
 import { PromptModal } from "./PromptModal";
+import { BulkActionBar } from "./BulkActionBar";
 import { ClipboardDetector } from "./ClipboardDetector";
 import { ToastStack, type ToastMessage } from "./Toast";
 
@@ -87,6 +90,10 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
   const [prefillContent, setPrefillContent] = useState<string>("");
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // 批量选择：ids 用 Set，选中态查询是 O(1)；退出时整体清空。
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   // 待删除的批次。刻意只留一个批次定时器：连删多条合并成一次提交 + 一次撤销，
   // 而不是每条各弹一个带按钮的 toast（那会变成视觉噪音）。
@@ -396,6 +403,151 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
 
   const clearModel = useCallback(() => setSelectedModel(""), []);
 
+  // ── 批量选择 ──────────────────────────────────────────────────────────
+
+  const exitSelectionMode = useCallback(() => {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+  }, []);
+
+  const toggleSelectionMode = useCallback(() => {
+    setSelectionMode((prev) => !prev);
+    // 进入和退出都清空：不想让上一次的选择在下次进入时"诈尸"。
+    setSelectedIds(new Set());
+  }, []);
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const allVisibleSelected =
+    filteredPrompts.length > 0 &&
+    filteredPrompts.every((prompt) => selectedIds.has(prompt.id));
+
+  const selectedVisibleCount = useMemo(
+    () =>
+      filteredPrompts.reduce(
+        (sum, prompt) => (selectedIds.has(prompt.id) ? sum + 1 : sum),
+        0
+      ),
+    [filteredPrompts, selectedIds]
+  );
+
+  const toggleSelectAllVisible = useCallback(() => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const all = filteredPrompts.every((prompt) => next.has(prompt.id));
+      for (const prompt of filteredPrompts) {
+        if (all) next.delete(prompt.id);
+        else next.add(prompt.id);
+      }
+      return next;
+    });
+  }, [filteredPrompts]);
+
+  // 删除或别的设备改动后，选中集合里可能残留已不存在的 id。
+  // 只随 prompts 变化修剪；不依赖 selectedIds 本身，避免自触发循环。
+  useEffect(() => {
+    if (selectedIds.size === 0) return;
+    const existing = new Set(prompts.map((prompt) => prompt.id));
+    setSelectedIds((prev) => {
+      const next = new Set<string>();
+      let changed = false;
+      for (const id of prev) {
+        if (existing.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [prompts, selectedIds.size]);
+
+  const handleBulkSetModel = useCallback(
+    async (model: string) => {
+      if (bulkBusy) return;
+      const ids = Array.from(selectedIds);
+      if (ids.length === 0) return;
+      const idSet = new Set(ids);
+
+      setBulkBusy(true);
+      try {
+        const result = await bulkSetModel(ids, model);
+        if (!result.ok) {
+          pushToast(`批量设置模型失败：${result.error}`, "error");
+          // 分块更新可能已经写进去一部分，必须回源校准，不能拿旧状态继续显示。
+          router.refresh();
+          return;
+        }
+
+        setPrompts((prev) =>
+          prev.map((prompt) =>
+            idSet.has(prompt.id) ? { ...prompt, model: result.data.model } : prompt
+          )
+        );
+        exitSelectionMode();
+        pushToast(
+          result.data.model
+            ? `已将 ${result.data.updated} 条设为「${result.data.model}」`
+            : `已清除 ${result.data.updated} 条的模型`
+        );
+        lastRefreshRef.current = Date.now();
+        router.refresh();
+      } catch (error) {
+        if (isRedirectError(error)) return;
+        pushToast("批量设置模型失败", "error");
+        router.refresh();
+      } finally {
+        setBulkBusy(false);
+      }
+    },
+    [bulkBusy, selectedIds, pushToast, exitSelectionMode, router]
+  );
+
+  const handleBulkFavorite = useCallback(
+    async (value: boolean) => {
+      if (bulkBusy) return;
+      const ids = Array.from(selectedIds);
+      if (ids.length === 0) return;
+      const idSet = new Set(ids);
+
+      setBulkBusy(true);
+      try {
+        const result = await bulkSetFavorite(ids, value);
+        if (!result.ok) {
+          pushToast(
+            `批量${value ? "收藏" : "取消收藏"}失败：${result.error}`,
+            "error"
+          );
+          router.refresh();
+          return;
+        }
+
+        setPrompts((prev) =>
+          prev.map((prompt) =>
+            idSet.has(prompt.id) ? { ...prompt, is_favorite: value } : prompt
+          )
+        );
+        exitSelectionMode();
+        pushToast(
+          `已${value ? "收藏" : "取消收藏"} ${result.data.updated} 条`
+        );
+        lastRefreshRef.current = Date.now();
+        router.refresh();
+      } catch (error) {
+        if (isRedirectError(error)) return;
+        pushToast(`批量${value ? "收藏" : "取消收藏"}失败`, "error");
+        router.refresh();
+      } finally {
+        setBulkBusy(false);
+      }
+    },
+    [bulkBusy, selectedIds, pushToast, exitSelectionMode, router]
+  );
+
   const handleCreate = useCallback(
     async (data: NewPrompt) => {
       const created = await runAction(() => createPrompt(data), "添加失败");
@@ -611,9 +763,15 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
           onNew={openNewModal}
           onOpenSidebar={() => setSidebarOpen(true)}
           resultCount={filteredPrompts.length}
+          selectionMode={selectionMode}
+          onToggleSelectionMode={toggleSelectionMode}
         />
 
-        <div className="scrollbar-thin flex-1 overflow-y-auto px-4 pb-8 sm:px-8">
+        <div
+          className={`scrollbar-thin flex-1 overflow-y-auto px-4 sm:px-8 ${
+            selectionMode ? "pb-32" : "pb-8"
+          }`}
+        >
           {filteredPrompts.length === 0 ? (
             <EmptyState
               onNew={openNewModal}
@@ -635,6 +793,9 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
                   onModelClick={toggleModel}
                   activeTags={selectedTags}
                   activeModel={selectedModel}
+                  selectionMode={selectionMode}
+                  selected={selectedIds.has(prompt.id)}
+                  onToggleSelect={toggleSelect}
                 />
               ))}
             </div>
@@ -667,7 +828,26 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
         existingPrompts={prompts}
       />
 
-      <ToastStack messages={toasts} onDismiss={dismissToast} />
+      {selectionMode && (
+        <BulkActionBar
+          count={selectedIds.size}
+          visibleSelectedCount={selectedVisibleCount}
+          visibleCount={filteredPrompts.length}
+          allVisibleSelected={allVisibleSelected}
+          modelSuggestions={modelSuggestions}
+          busy={bulkBusy}
+          onToggleSelectAll={toggleSelectAllVisible}
+          onApplyModel={handleBulkSetModel}
+          onSetFavorite={handleBulkFavorite}
+          onExit={exitSelectionMode}
+        />
+      )}
+
+      <ToastStack
+        messages={toasts}
+        onDismiss={dismissToast}
+        raised={selectionMode}
+      />
     </div>
   );
 }
