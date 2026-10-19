@@ -40,6 +40,7 @@
 - **Full-Text Search** — Search across titles, content, notes, and tags.
 - **Favorites Filter** — Pin the prompts you reach for most.
 - **Open Read API** — `GET /api/prompts` needs no key at all, so any cloud agent anywhere can pull your prompts in one request.
+- **Tag Index API** — `GET /api/tags` returns `{tag, count}` only, so an agent can reuse existing tags instead of pulling the whole library just to enumerate them.
 - **Locked Write API** — `POST /api/prompts` always requires a bearer secret.
 - **Not Indexable** — `robots.txt`, `X-Robots-Tag` and page metadata all opt out of search engines.
 - **Dark Theme + Neon Index Cards** — Category-based accent colors on a dark archive palette.
@@ -124,6 +125,7 @@ Three deliberate layers, each with a different trade-off:
 |---------|------|-----------|
 | Web UI (`/`, `/api-docs`) | Password → signed session cookie, enforced in `src/middleware.ts` **and** re-checked in every Server Action | Only you see the front end |
 | `GET /api/prompts` | **None** | Any cloud agent, anywhere, can read without plumbing a key. Public readability is an accepted trade-off. |
+| `GET /api/tags` | **None** | Tag names and counts only — no prompt bodies. Lets an agent pick consistent tags without downloading the library first. |
 | `POST /api/prompts` | `Authorization: Bearer <API_SECRET>`, always | No anonymous path to mutate data |
 | `GET /api/export` | `Bearer <API_SECRET>` or `<CRON_SECRET>`; **503 when neither is configured** | It is a whole-library dump — it must never be public |
 
@@ -250,6 +252,8 @@ Prompt-Vault/
 │   │   ├── loading.tsx             # 加载骨架
 │   │   ├── robots.ts               # 全站 Disallow
 │   │   ├── api/prompts/route.ts    # 对外 REST API（Edge runtime）
+│   │   ├── api/tags/route.ts       # 标签总览 {tag,count}（公开只读）
+│   │   ├── api/export/route.ts     # 整库导出（需 Bearer）
 │   │   ├── api-docs/page.tsx       # 自带 API 文档
 │   │   ├── layout.tsx              # 根布局 + noindex metadata
 │   │   └── globals.css             # 主题令牌（CSS 变量）
@@ -328,6 +332,7 @@ npm start
 - 全文搜索（标题、内容、备注、标签）
 - 收藏筛选
 - **开放读取接口**：`GET /api/prompts` 无需任何密钥，云端 agent 随时随地可直接取用
+- **标签索引接口**：`GET /api/tags` 只回 `{tag, count}`，agent 写之前能查重，不必为了数标签拉全库
 - **写入需要密钥**：`POST /api/prompts` 必须携带 Bearer 密钥
 - **整库导出**：`GET /api/export`（必须鉴权）用于备份，支持 JSON / Markdown
 - **不被搜索引擎收录**：robots.txt + X-Robots-Tag + 页面 meta 三重声明

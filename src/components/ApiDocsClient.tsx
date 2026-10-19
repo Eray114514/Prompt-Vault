@@ -88,6 +88,7 @@ function CopyButton({
 
 export function ApiDocsClient({ baseUrl, apiSecret }: ApiDocsClientProps) {
   const apiBase = `${baseUrl}/api/prompts`;
+  const tagsUrl = `${baseUrl}/api/tags`;
   const exportUrl = `${baseUrl}/api/export`;
   const writeEnabled = apiSecret !== null;
   const [revealed, setRevealed] = useState(false);
@@ -107,6 +108,10 @@ export function ApiDocsClient({ baseUrl, apiSecret }: ApiDocsClientProps) {
   --data-urlencode "tag=neon" \\
   --data-urlencode "q=midjourney" \\
   --data-urlencode "limit=10"`;
+
+  const tagsExample = `curl -G "${tagsUrl}" \\
+  --data-urlencode "category=image_generation" \\
+  --data-urlencode "q=poster"`;
 
   const buildCreateExample = (bearer: string) => `curl -X POST "${apiBase}" \\
   -H "Content-Type: application/json" \\
@@ -149,7 +154,17 @@ GET 不需要凭据；POST 与整库导出必须带上上面这行完整请求�
 示例：
 ${listExample}
 
-## 2. 写入提示词  POST ${apiBase}
+## 2. 查已有标签  GET ${tagsUrl}
+写之前先查一眼，复用已有标签，别造同义或只差大小写的近义词。
+返回 [{ tag, count }]，按出现次数降序；Poster 与 poster 视为同一个，显示保留首次出现的写法。
+参数：
+- q：可选，子串匹配标签名，不区分大小写
+- category：可选，可重复传入；默认统计全部四个分类
+- limit：可选，默认 200，最大 500
+示例：
+${tagsExample}
+
+## 3. 写入提示词  POST ${apiBase}
 请求头：
   Content-Type: application/json
   Authorization: Bearer ${secretForText}
@@ -158,11 +173,11 @@ ${listExample}
 - content：必填，最长 20000 字符
 - category：必填，取值见文末
 - notes：可选，最长 5000 字符
-- tags：可选，最多 24 个，每个最长 50 字符
+- tags：可选，最多 24 个，每个最长 50 字符。**先从上面的接口取已有标签**
 示例：
 ${buildCreateExample(secretForText)}
 
-## 3. 整库导出  GET ${exportUrl}
+## 4. 整库导出  GET ${exportUrl}
 需要同一个 Bearer。参数 format=json|md（默认 json）、notes=1|0（默认含备注）。
 示例：
 ${buildExportExample(secretForText)}
@@ -370,6 +385,74 @@ ${categoryList}
             <CodeBlock code={listExample} label="cURL 示例" />
           </section>
 
+          {/* TAGS */}
+          <section>
+            <div className="mb-3 flex items-center gap-3">
+              <span className="rounded-md bg-green-500/15 px-2 py-1 text-xs font-semibold text-green-400">
+                GET
+              </span>
+              <h2 className="font-display text-lg text-white">
+                查询已有标签（公开，无需密钥）
+              </h2>
+            </div>
+            <p className="mb-3 text-sm text-text-secondary">
+              写提示词之前先查一眼，复用已有标签 —— 标签是自由文本，没有枚举可查，
+              不查就只能把整个库拉下来自己数。返回{" "}
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                {"{ tag, count }"}
+              </code>{" "}
+              数组，按出现次数降序。大小写不敏感：{" "}
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                Poster
+              </code>{" "}
+              与{" "}
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                poster
+              </code>{" "}
+              算同一个，显示时保留首次出现的写法。
+            </p>
+            <p className="mb-4 text-sm text-text-secondary">
+              这个端点只回标签名与计数，不涉及任何提示词正文。默认统计全部四个分类。
+            </p>
+
+            <div className="mb-4 overflow-hidden rounded-lg border border-border-subtle">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-bg-elevated/50 text-xs uppercase tracking-wider text-text-muted">
+                  <tr>
+                    <th className="px-4 py-2">参数</th>
+                    <th className="px-4 py-2">类型</th>
+                    <th className="px-4 py-2">说明</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border-subtle text-text-secondary">
+                  <tr>
+                    <td className="px-4 py-2 font-mono text-xs">q</td>
+                    <td className="px-4 py-2 text-xs">string</td>
+                    <td className="px-4 py-2">
+                      可选，子串匹配标签名，不区分大小写。用来确认“是不是已经有类似的标签”
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="px-4 py-2 font-mono text-xs">category</td>
+                    <td className="px-4 py-2 text-xs">string</td>
+                    <td className="px-4 py-2">
+                      可选，可重复传入；默认统计全部四个分类
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="px-4 py-2 font-mono text-xs">limit</td>
+                    <td className="px-4 py-2 text-xs">number</td>
+                    <td className="px-4 py-2">
+                      可选，返回条数上限，默认 200，最大 500
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <CodeBlock code={tagsExample} label="cURL 示例" />
+          </section>
+
           {/* POST */}
           <section>
             <div className="mb-3 flex items-center gap-3">
@@ -390,6 +473,16 @@ ${categoryList}
                 API_SECRET
               </code>
               ，先在上面那张卡片里复制出来，或直接复制整份文档。
+            </p>
+            <p className="mb-4 text-sm text-text-secondary">
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                tags
+              </code>{" "}
+              是自由文本，建议先调{" "}
+              <code className="rounded bg-bg-elevated px-1 py-0.5 text-text-primary">
+                GET /api/tags
+              </code>{" "}
+              看已有写法再填，避免造出只差大小写的近义标签。
             </p>
 
             <div className="mb-4 overflow-hidden rounded-lg border border-border-subtle">

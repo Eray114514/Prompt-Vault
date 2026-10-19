@@ -1,9 +1,10 @@
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { secretMatches } from "@/lib/api-auth";
+import { baseHeaders, jsonResponse } from "@/lib/api-response";
 import { parseNewPrompt } from "@/lib/prompts";
 import {
   MAX_FAVORITES_RETURNED,
@@ -22,26 +23,6 @@ import {
  *   直接返回 503，而不是"退化成无鉴权"—— 写入侧不允许存在任何裸奔路径。
  * - 两侧都带 `X-Robots-Tag: noindex`，配合全站 robots.txt，避免公开内容被搜索引擎收录。
  */
-
-const NOINDEX = "noindex, nofollow, noarchive, nosnippet, noimageindex";
-
-function baseHeaders(): Record<string, string> {
-  return {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    "X-Robots-Tag": NOINDEX,
-  };
-}
-
-function jsonResponse(body: unknown, status = 200, cacheSeconds = 0) {
-  const headers = baseHeaders();
-  headers["Cache-Control"] =
-    cacheSeconds > 0
-      ? `public, s-maxage=${cacheSeconds}, stale-while-revalidate=300`
-      : "no-store, must-revalidate";
-  return NextResponse.json(body, { status, headers });
-}
 
 // sha256Hex + secretMatches 已抽到 @/lib/api-auth，与 /api/export 共用同一份实现，
 // 避免将来改安全策略时只改到一处。
