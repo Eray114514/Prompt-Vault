@@ -12,6 +12,86 @@ const MAX_SUGGESTIONS = 8;
 /** 快捷模型 chip 的数量：够覆盖常用模型，又不至于把表单撑长。 */
 const MAX_MODEL_CHIPS = 6;
 
+/** 草稿与表单字段一一对应，刻意不含 tagInput 这类"输到一半"的临时值。 */
+interface FormDraft {
+  title: string;
+  content: string;
+  notes: string;
+  category: Category;
+  model: string;
+  tags: string[];
+}
+
+function draftStorageKey(id: string | undefined): string {
+  return `pv_draft:${id ?? "new"}`;
+}
+
+function sameDraft(a: FormDraft, b: FormDraft): boolean {
+  return (
+    a.title === b.title &&
+    a.content === b.content &&
+    a.notes === b.notes &&
+    a.category === b.category &&
+    a.model === b.model &&
+    a.tags.length === b.tags.length &&
+    a.tags.every((tag, index) => tag === b.tags[index])
+  );
+}
+
+/**
+ * 读草稿。用 sessionStorage 而不是 localStorage：草稿属于"这个标签页里还没写完的东西"，
+ * 关掉标签页就该消失；但整页刷新、组件重新挂载之后它得还在 —— 这正是要的效果。
+ */
+function readDraft(key: string): FormDraft | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<FormDraft> | null;
+    if (!parsed || typeof parsed !== "object") return null;
+    if (
+      typeof parsed.title !== "string" ||
+      typeof parsed.content !== "string" ||
+      typeof parsed.notes !== "string" ||
+      typeof parsed.model !== "string"
+    ) {
+      return null;
+    }
+    if (!CATEGORIES.some((cat) => cat.value === parsed.category)) return null;
+    const tags = Array.isArray(parsed.tags)
+      ? parsed.tags.filter((tag): tag is string => typeof tag === "string")
+      : [];
+    return {
+      title: parsed.title,
+      content: parsed.content,
+      notes: parsed.notes,
+      category: parsed.category as Category,
+      model: parsed.model,
+      tags,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeDraft(key: string, draft: FormDraft): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(key, JSON.stringify(draft));
+  } catch {
+    // 配额满或隐私模式：草稿保护是尽力而为，写不进去也不该挡住编辑
+  }
+}
+
+function clearDraft(key: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(key);
+  } catch {
+    // 同上
+  }
+}
+
 interface PromptModalProps {
   prompt: Prompt | null;
   defaultCategory?: Category;
@@ -28,7 +108,11 @@ interface PromptModalProps {
   defaultModel?: string;
   /** 全量模型（父级聚合后传入，按使用次数降序）。 */
   modelSuggestions?: string[];
-  onSubmit: (data: NewPrompt) => Promise<void>;
+  /**
+   * 返回 true 表示真的落库成功 —— 弹窗据此决定是否丢弃草稿。
+   * 只靠"Promise resolve"不够：父级的 runAction 会吞掉失败，失败也是 resolve。
+   */
+  onSubmit: (data: NewPrompt) => Promise<boolean>;
   onClose: () => void;
 }
 
@@ -43,19 +127,6 @@ export function PromptModal({
   onSubmit,
   onClose,
 }: PromptModalProps) {
-  const [title, setTitle] = useState("");
-  const [content, setContent] = useState("");
-  const [notes, setNotes] = useState("");
-  const [category, setCategory] = useState<Category>(DEFAULT_CATEGORY);
-  const [model, setModel] = useState("");
-  const [tags, setTags] = useState<string[]>([]);
-  const [tagInput, setTagInput] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [suggestOpen, setSuggestOpen] = useState(false);
-  const [highlight, setHighlight] = useState(-1);
-  const [modelOpen, setModelOpen] = useState(false);
-  const [modelHighlight, setModelHighlight] = useState(-1);
-
   const tagInputRef = useRef<HTMLInputElement>(null);
   const modelInputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -66,32 +137,74 @@ export function PromptModal({
   // 读 state 会读到本次事件之前的旧值。
   const suggestOpenRef = useRef(false);
   const modelOpenRef = useRef(false);
+  // 按下鼠标时指针是不是落在遮罩本身（而不是弹窗内部再拖出来）。
+  // 浏览器把 mousedown 与 mouseup 的共同祖先当作 click 目标，所以在正文里选中文字、
+  // 鼠标拖到框外松手，click 会打在遮罩上 —— 光看 click 的 target 拦不住。
+  const backdropPressRef = useRef(false);
+  // 已成功保存：卸载前不要再用旧值把草稿写回去。
+  const savedRef = useRef(false);
+
+  const draftKey = draftStorageKey(prompt?.id);
+
+  /**
+   * 挂载时一次性算出初值（含草稿恢复）。之后父组件再怎么重渲染都不再碰表单。
+   *
+   * 旧实现把 props 写进 effect 依赖里重置表单，于是 `router.refresh()` 一类
+   * "页面自己刷新一下"的动作只要让 prompt 换了对象身份，标题/正文/备注就会被
+   * 服务端值覆盖回去 —— 用户看到的就是"我没动，编辑了一半的东西没了"。
+   */
+  const [initial] = useState(() => {
+    const base: FormDraft = prompt
+      ? {
+          title: prompt.title,
+          content: prompt.content,
+          notes: prompt.notes ?? "",
+          category: prompt.category,
+          model: prompt.model ?? "",
+          tags: prompt.tags,
+        }
+      : {
+          // 新建：分类、模型与标签都继承当前筛选的位置
+          title: "",
+          content: prefillContent ?? "",
+          notes: "",
+          category: defaultCategory ?? DEFAULT_CATEGORY,
+          model: defaultModel ?? "",
+          tags: inheritedTagsRef.current,
+        };
+
+    // 从剪贴板"添加为提示词"是一次明确的新建意图，不该被上次的草稿顶掉。
+    const stored = prefillContent ? null : readDraft(draftKey);
+    const values = stored && !sameDraft(stored, base) ? stored : base;
+    return { base, values, restored: values !== base };
+  });
+
+  const [title, setTitle] = useState(initial.values.title);
+  const [content, setContent] = useState(initial.values.content);
+  const [notes, setNotes] = useState(initial.values.notes);
+  const [category, setCategory] = useState<Category>(initial.values.category);
+  const [model, setModel] = useState(initial.values.model);
+  const [tags, setTags] = useState<string[]>(initial.values.tags);
+  const [tagInput, setTagInput] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [draftRestored, setDraftRestored] = useState(initial.restored);
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const [highlight, setHighlight] = useState(-1);
+  const [modelOpen, setModelOpen] = useState(false);
+  const [modelHighlight, setModelHighlight] = useState(-1);
 
   useFocusTrap(dialogRef, true);
 
+  // 每次改动都落一份草稿到本标签页；回到初值就把草稿删掉，不留垃圾。
   useEffect(() => {
-    if (prompt) {
-      setTitle(prompt.title);
-      setContent(prompt.content);
-      setNotes(prompt.notes ?? "");
-      setCategory(prompt.category);
-      setModel(prompt.model ?? "");
-      setTags(prompt.tags);
-    } else {
-      // 新建：分类、模型与标签都继承当前筛选的位置
-      setTitle("");
-      setContent(prefillContent ?? "");
-      setNotes("");
-      setCategory(defaultCategory ?? DEFAULT_CATEGORY);
-      setModel(defaultModel ?? "");
-      setTags(inheritedTagsRef.current);
+    if (savedRef.current) return;
+    const current: FormDraft = { title, content, notes, category, model, tags };
+    if (sameDraft(current, initial.base)) {
+      clearDraft(draftKey);
+      return;
     }
-    setTagInput("");
-    setSuggestOpen(false);
-    setHighlight(-1);
-    setModelOpen(false);
-    setModelHighlight(-1);
-  }, [prompt, prefillContent, defaultCategory, defaultModel]);
+    writeDraft(draftKey, current);
+  }, [title, content, notes, category, model, tags, initial.base, draftKey]);
 
   useEffect(() => {
     suggestOpenRef.current = suggestOpen;
@@ -280,12 +393,26 @@ export function PromptModal({
     closeSuggestions();
   };
 
+  /** 丢弃恢复回来的草稿，退回库里已保存的版本。 */
+  const discardDraft = () => {
+    setTitle(initial.base.title);
+    setContent(initial.base.content);
+    setNotes(initial.base.notes);
+    setCategory(initial.base.category);
+    setModel(initial.base.model);
+    setTags(initial.base.tags);
+    setTagInput("");
+    closeSuggestions();
+    closeModelSuggestions();
+    setDraftRestored(false);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !content.trim() || submitting) return;
     setSubmitting(true);
     try {
-      await onSubmit({
+      const saved = await onSubmit({
         title: title.trim(),
         content: content.trim(),
         notes: notes.trim(),
@@ -293,6 +420,12 @@ export function PromptModal({
         model: model.trim(),
         tags,
       });
+      // 只有真的落库成功才清草稿。失败时草稿必须留着 —— 否则一次网络抖动
+      // 就把用户刚写完的东西扔了，而这正是这次要修的场景。
+      if (saved) {
+        savedRef.current = true;
+        clearDraft(draftKey);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -301,7 +434,16 @@ export function PromptModal({
   return (
     <div
       className="animate-fade-in fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 sm:p-4"
-      onClick={onClose}
+      // 关闭必须"起手就在遮罩上"。否则在正文里拖选文字、鼠标划出边框再松手，
+      // 浏览器会把 click 派发到遮罩（mousedown/mouseup 的共同祖先），整个编辑框就没了。
+      onPointerDown={(e) => {
+        backdropPressRef.current = e.target === e.currentTarget;
+      }}
+      onClick={(e) => {
+        const startedOnBackdrop = backdropPressRef.current;
+        backdropPressRef.current = false;
+        if (startedOnBackdrop && e.target === e.currentTarget) onClose();
+      }}
     >
       <div
         ref={dialogRef}
@@ -333,6 +475,22 @@ export function PromptModal({
             <CloseIcon size={18} />
           </button>
         </div>
+
+        {draftRestored && (
+          <div className="flex shrink-0 items-center gap-2 border-b border-accent/20 bg-accent/[0.06] px-5 py-2 text-[11px] text-text-secondary">
+            <span aria-hidden="true" className="text-[8px] text-accent">
+              ●
+            </span>
+            <span>已恢复上次未保存的草稿</span>
+            <button
+              type="button"
+              onClick={discardDraft}
+              className="ml-auto rounded px-1.5 py-0.5 text-text-muted underline decoration-dotted underline-offset-2 transition hover:text-text-primary"
+            >
+              丢弃，改用已保存的版本
+            </button>
+          </div>
+        )}
 
         <form
           onSubmit={handleSubmit}

@@ -163,6 +163,16 @@ Category neon accent colors live **only** in `CATEGORY_COLORS` (`src/lib/types.t
 
 Animations defined in **both** `globals.css` and `tailwind.config.ts` under the same name will silently override each other. `card-enter` and `flash-copy` live only in `globals.css` — keep it that way.
 
+## The editor (PromptModal) — don't reintroduce data loss
+
+Three invariants keep a half-written prompt from evaporating. All three were added in response to real complaints; breaking any one brings them back.
+
+1. **Initialize form state once, on mount.** The values in `useState` initializers come from a single mount-time snapshot (`initial`). Do **not** add an effect that writes props into state when they change — `router.refresh()` and any parent re-render can hand the modal a new `prompt` object identity, and such an effect silently overwrites the draft with server values. If the editing target must change, the parent passes a new `key` instead.
+2. **Drafts live in `sessionStorage`** (`pv_draft:<id|new>`, see `readDraft`/`writeDraft`). Every edit is persisted; saving successfully — and only then — clears it. `onSubmit` therefore returns `Promise<boolean>`: `runAction` resolves on failure too, so the modal cannot infer success from the promise alone. Because the draft is stored, closing the modal (Esc, backdrop, reload) is never destructive: reopening offers the draft back, with an explicit 「丢弃」 exit.
+3. **The backdrop closes only when the press started on the backdrop.** `click` fires on the nearest common ancestor of mousedown/mouseup, so dragging a text selection from a textarea out of the dialog would otherwise close the whole editor. Hence `backdropPressRef` records the pointerdown target.
+
+Related: the focus listener in `PromptVault.tsx` must **not** call `router.refresh()` while the modal is open — re-rendering the whole route under someone's typing is exactly the "it refreshed itself and my text was gone" report.
+
 ## Accessibility & layout expectations
 
 - Every form control needs a real `<label htmlFor>` / `id` pair. Placeholder text is not a label.

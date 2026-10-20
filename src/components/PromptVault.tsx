@@ -184,10 +184,13 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
   }, [initialPrompts]);
 
   // 窗口重新获得焦点时拉一次最新数据，让多端同步真正生效。
+  // 但编辑弹窗开着的时候绝不自动同步：焦点一回来就 router.refresh()，
+  // 整页会重新渲染一遍，用户视角就是"我没动，页面自己刷了，写了一半的东西没了"。
   useEffect(() => {
     const maybeRefresh = () => {
       if (document.visibilityState !== "visible") return;
       if (pendingDeletesRef.current.size > 0) return;
+      if (modalOpen) return;
       if (Date.now() - lastRefreshRef.current < REFRESH_THROTTLE_MS) return;
       lastRefreshRef.current = Date.now();
       router.refresh();
@@ -199,7 +202,7 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
       window.removeEventListener("focus", maybeRefresh);
       document.removeEventListener("visibilitychange", maybeRefresh);
     };
-  }, [router]);
+  }, [router, modalOpen]);
 
   // 卸载时把还在犹豫窗口里的删除一次性提交出去（不 await：页面正在走，
   // 请求发出去就行；万一被浏览器取消，记录会保留 —— 失败方向是安全的）。
@@ -549,9 +552,9 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
   );
 
   const handleCreate = useCallback(
-    async (data: NewPrompt) => {
+    async (data: NewPrompt): Promise<boolean> => {
       const created = await runAction(() => createPrompt(data), "添加失败");
-      if (!created) return;
+      if (!created) return false;
 
       setPrompts((prev) => sortByCreatedDesc([created, ...prev]));
       setModalOpen(false);
@@ -560,17 +563,18 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
       pushToast("已添加提示词");
       lastRefreshRef.current = Date.now();
       router.refresh();
+      return true;
     },
     [runAction, pushToast, router]
   );
 
   const handleUpdate = useCallback(
-    async (id: string, data: NewPrompt) => {
+    async (id: string, data: NewPrompt): Promise<boolean> => {
       const updated = await runAction(
         () => updatePrompt(id, data),
         "更新失败"
       );
-      if (!updated) return;
+      if (!updated) return false;
 
       setPrompts((prev) =>
         sortByCreatedDesc(prev.map((p) => (p.id === id ? updated : p)))
@@ -580,6 +584,7 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
       pushToast("已更新");
       lastRefreshRef.current = Date.now();
       router.refresh();
+      return true;
     },
     [runAction, pushToast, router]
   );
@@ -731,7 +736,7 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
   }, []);
 
   const handleSubmit = useCallback(
-    (data: NewPrompt) => {
+    (data: NewPrompt): Promise<boolean> => {
       if (editingPrompt) return handleUpdate(editingPrompt.id, data);
       return handleCreate(data);
     },
@@ -805,6 +810,9 @@ export function PromptVault({ initialPrompts }: PromptVaultProps) {
 
       {modalOpen && (
         <PromptModal
+          // 换一个编辑目标就换一次挂载：表单初值只在挂载时算一次，
+          // 靠这个 key 保证"编辑 A → 编辑 B"不会把 A 的草稿带过去。
+          key={editingPrompt?.id ?? "new"}
           prompt={editingPrompt}
           defaultCategory={
             filter !== "all" && filter !== "favorites" ? filter : undefined
